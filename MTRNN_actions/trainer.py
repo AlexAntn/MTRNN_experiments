@@ -4,6 +4,9 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 
 from CTRNN import CTRNNModel
+from MTRNNJustModel import CTRNNModelTest
+
+from SOM import SOM
 
 import time
 import operator
@@ -30,46 +33,46 @@ def processWords(sentence, x_train, k):
 
     return x_train 
 
-def process_lang_data(verb, obj):
+def get_combination(verb, obj, control_input):
+    new_control = np.zeros((1, control_input.shape[1], control_input.shape[2]))
     if verb >= 0.0 and verb < 0.1:
-        sentence = "slide left"
+        new_control[0, :, 0:4] = [0.0, 0.0, 0.0, 1.0]
     elif verb >= 0.1 and verb < 0.2:
-        sentence = "slide right"
+        new_control[0, :, 0:4] = [0.0, 0.0, 1.0, 0.0]
     elif verb >= 0.2 and verb < 0.3:
-        sentence = "touch"
+        new_control[0, :, 0:4] = [0.0, 0.0, 1.0, 1.0]
     elif verb >= 0.3 and verb < 0.4:
-        sentence = "reach"
+        new_control[0, :, 0:4] = [0.0, 1.0, 0.0, 0.0]
     elif verb >= 0.4 and verb < 0.5:
-        sentence = "push"
+        new_control[0, :, 0:4] = [0.0, 1.0, 0.0, 1.0]
     elif verb >= 0.5 and verb < 0.6:
-        sentence = "pull"
+        new_control[0, :, 0:4] = [0.0, 1.0, 1.0, 0.0]
     elif verb >= 0.6 and verb < 0.7:
-        sentence = "point"
+        new_control[0, :, 0:4] = [0.0, 1.0, 1.0, 1.0]
     elif verb >= 0.7 and verb < 0.8:
-        sentence = "grasp"
+        new_control[0, :, 0:4] = [1.0, 0.0, 0.0, 0.0]
     else:
-        sentence = "lift"
+        new_control[0, :, 0:4] = [1.0, 0.0, 0.0, 1.0]
     if obj >= 0.0 and obj < 0.1:
-        sentence = sentence + " the " + "tractor"
+        new_control[0, :, 4:8] = [0.0, 0.0, 0.0, 1.0]
     elif obj >= 0.1 and obj < 0.2:
-        sentence = sentence + " the " + "hammer"
+        new_control[0, :, 4:8] = [0.0, 0.0, 1.0, 0.0]
     elif obj >= 0.2 and obj < 0.3:
-        sentence = sentence + " the " + "ball"
+        new_control[0, :, 4:8] = [0.0, 0.0, 1.0, 1.0]
     elif obj >= 0.3 and obj < 0.4:
-        sentence = sentence + " the " + "bus"
+        new_control[0, :, 4:8] = [0.0, 1.0, 0.0, 0.0]
     elif obj >= 0.4 and obj < 0.5:
-        sentence = sentence + " the " + "modi"
+        new_control[0, :, 4:8] = [0.0, 1.0, 0.0, 1.0]
     elif obj >= 0.5 and obj < 0.6:
-        sentence = sentence + " the " + "car"
+        new_control[0, :, 4:8] = [0.0, 1.0, 1.0, 0.0]
     elif obj >= 0.6 and obj < 0.7:
-        sentence = sentence + " the " + "cup"
+        new_control[0, :, 4:8] = [0.0, 1.0, 1.0, 1.0]
     elif obj >= 0.7 and obj < 0.8:
-        sentence = sentence + " the " + "cubes"
+        new_control[0, :, 4:8] = [1.0, 0.0, 0.0, 0.0]
     else:
-        sentence = sentence + " the " + "spiky"
-    sentence = sentence + "."
+        new_control[0, :, 4:8] = [1.0, 0.0, 0.0, 1.0]
 
-    return sentence
+    return new_control
 
 #construction of control sequence (fixed combinations, 6 neurons, activation can be 0, 0.5 or 1.0)
 def get_combination(sentence, y_train, k):
@@ -180,11 +183,11 @@ def loadTrainingData():
     output_neurons = 41
     numInputNeurons = 100 # language neurons, 26 for letters plus space and stop plus "nothing"
     numControlNeurons = 45 
-    stepEachSeq = 100
+    stepEachSeq = 104
 
     combinations = ["".join(seq) for seq in itertools.product("01", repeat = 2)]
 
-    numSeq = 10 #from dataset
+    numSeq = 432 #from dataset
     #numSeq = len(actions) * len(objects)
     
     # sequence of vectors of encoders, to compare (x_train[0] corresponds to init_state)
@@ -202,38 +205,59 @@ def loadTrainingData():
 
     print("steps: ", stepEachSeq)
     print("number of sequences: ", numSeq)
+    ####################### Select true to pick random sequences to train (with repetitions!)####
+    RANDOM_SEQUENCES = False
     
 
-    control_input[0, :, 0:4] = [0.0, 0.0, 0.0, 1.0]
-    control_input[1, :, 0:4] = [0.0, 0.0, 1.0, 0.0]
-    control_input[2, :, 0:4] = [0.0, 0.0, 1.0, 1.0]
-    control_input[3, :, 0:4] = [0.0, 1.0, 0.0, 0.0]
-    control_input[4, :, 0:4] = [0.0, 1.0, 0.0, 1.0]
-    control_input[5, :, 0:4] = [0.0, 1.0, 1.0, 0.0]
-    control_input[6, :, 0:4] = [0.0, 1.0, 1.0, 1.0]
-    control_input[7, :, 0:4] = [1.0, 0.0, 0.0, 0.0]
-    control_input[8, :, 0:4] = [1.0, 0.0, 0.0, 1.0]
-    control_input[9, :, 0:4] = [1.0, 0.0, 1.0, 0.0]
+    #control_input[0, :, 0:4] = [0.0, 0.0, 0.0, 1.0]
+    #control_input[1, :, 0:4] = [0.0, 0.0, 1.0, 0.0]
+    #control_input[2, :, 0:4] = [0.0, 0.0, 1.0, 1.0]
+    #control_input[3, :, 0:4] = [0.0, 1.0, 0.0, 0.0]
+    #control_input[4, :, 0:4] = [0.0, 1.0, 0.0, 1.0]
+    #control_input[5, :, 0:4] = [0.0, 1.0, 1.0, 0.0]
+    #control_input[6, :, 0:4] = [0.0, 1.0, 1.0, 1.0]
+    #control_input[7, :, 0:4] = [1.0, 0.0, 0.0, 0.0]
+    #control_input[8, :, 0:4] = [1.0, 0.0, 0.0, 1.0]
+    #control_input[9, :, 0:4] = [1.0, 0.0, 1.0, 0.0]
 
     dataFile = open("mtrnnTD.txt", 'r')
+
+    totalSeq = 432
+    sequences = []
+    if RANDOM_SEQUENCES:
+        for i in range(numSeq):
+            sequences += [np.random.randint(0, totalSeq)]
+            print(sequences[-1])
+    else:
+        sequences = np.arange(totalSeq)
     
     k = 0 #number of sequences
+    t = 0 #number of saved sequences
     while True:
         line = dataFile.readline()
         if line == "":
             break
         if line.find("SEQUENCE") != -1:
-            #print "found sequence"
-            for i in range(0, stepEachSeq):
-                line = dataFile.readline()
-                line_data = line.split("\t")
-                line_data[-1] = line_data[-1].replace("\r\n",'')
-                x_train[k, i,0:41] = line_data[2:43]
-                # motor actions start only after the sentence 
-                
+            if k in sequences: # to select random sentences
+                #print "found sequence"
+                for i in range(4, stepEachSeq):
+                    line = dataFile.readline()
+                    line_data = line.split("\t")
+                    line_data[-1] = line_data[-1].replace("\r\n",'')
+                    if i==4:
+                        x_train[t, 0,0:41] = line_data[2:43]
+                        x_train[t, 1,0:41] = line_data[2:43]
+                        x_train[t, 2,0:41] = line_data[2:43]
+                        x_train[t, 3,0:41] = line_data[2:43]
+                        x_train[t, 4,0:41] = line_data[2:43]
+                        control_input[t, :, :] = get_combination(line_data[0], line_data[1], control_input)
+                    else:
+                        x_train[t, i,0:41] = line_data[2:43]
+                    # motor actions start only after the sentence 
+                t = t+1
             # indicator of how many sequences we have gone through
             k = k+1 
-        if k == numSeq:
+        if k == totalSeq:
             break
         
     dataFile.close()
@@ -242,30 +266,38 @@ def loadTrainingData():
     return x_train, y_train, numSeq, stepEachSeq, control_input
 
 
-def plot(loss_list):
-    #plt.subplot(2,3,1)
-    plt.cla()
-    plt.plot(loss_list)
+def plot(loss_list, fig, ax):
+    #fig.cla()
+    ax.plot(loss_list)
 
-    plt.draw()
-    plt.pause(0.0001)
+    fig.canvas.flush_events()
+    #plt.draw()
+    #plt.pause(0.0001)
 
 
-def removeCases(y_train, control_input, numSeq, stepEachSeq, numControlNeurons):
-    numSeqMod = numSeq - numSeq//10
-    print(numSeqMod)
-    y_mod = np.asarray(np.zeros((numSeqMod  , stepEachSeq)),dtype=np.int32)
+def removeCases(y_train, x_train, control_input, numSeq, stepEachSeq, numControlNeurons, numCombinationsMiss):
+    if numSeq%numCombinationsMiss == 0:
+        numSeqMod = numSeq - numCombinationsMiss
+        print("number of sequences is multiple")
+    else:
+        numSeqMod = numSeq - numCombinationsMiss -1
+        print("number of sequences is NOT multiple")
+    jumps = numSeq//numCombinationsMiss
+    print("modified number of sequences: ", numSeqMod)
+    y_mod = np.asarray(np.zeros((numSeqMod  , stepEachSeq, y_train.shape[2])),dtype=np.int32)
+    x_mod = np.asarray(np.zeros((numSeqMod  , stepEachSeq, x_train.shape[2])),dtype=np.int32)
     control_mod = np.asarray(np.zeros((numSeqMod, stepEachSeq, numControlNeurons)),dtype=np.float32)
     k = 0
     for i in range(numSeq):
-        if i%10 != 0:
-            y_mod[k,:] = y_train[i,:]
+        if i%jumps != 0:
+            y_mod[k,:, :] = y_train[i,:, :]
+            x_mod[k, :, :] = x_train[i, :, :]
             control_mod[k,:,:] = control_input[i,:,:]
             k += 1
         else:
             print("removed sentence number ", i)
-
-    return y_mod, control_mod, numSeqMod
+    raw_input()
+    return y_mod, x_mod, control_mod, numSeqMod, jumps
 
 def softmax(x):
     """Compute softmax values for each sets of scores in x."""
@@ -307,7 +339,7 @@ def create_batch(x_train, y_train, control_input, batch_size):
     y_out = np.zeros((batch_size, y_train.shape[1], y_train.shape[2]))
     control_out = np.zeros((batch_size, control_input.shape[1], control_input.shape[2]))
     for i in range(batch_size):
-        seq_index = np.random.randint(0,y_train.shape[2]+1)
+        seq_index = np.random.randint(0,y_train.shape[0])
         print("sequence: ",seq_index)
         x_out[i, :, :] = x_train[seq_index, :, :]
         y_out[i, :, :] = y_train[seq_index, :, :]
@@ -332,18 +364,19 @@ old_x = x_train
 #LEARNING_RATE = 5 * 1e-3
 LEARNING_RATE = 0.005
 
-NEPOCH = 5000 # number of times to train each sentence
+NEPOCH = 20000 # number of times to train each sentence
 #NEPOCH = 10
 
-batch_size = 61
     
 my_path= os.getcwd()
 figure_path = os.path.join(my_path, "matrix/")
 
 
 # DEFINE IF WE ARE TESTING MISSING SENTENCES HERE#
-TEST_MISSING_SENTENCES = False
+TEST_MISSING_SENTENCES = True
+numCombinationsMiss = 10
 USING_BIG_BATCH = False
+batch_size = 61
 ###################################################
 
 MTRNN = CTRNNModel([lang_input, lang_dim1, lang_dim2], [2.0, 5.0, 60.0], stepEachSeq, lang_input, output_neurons, LEARNING_RATE)
@@ -353,10 +386,19 @@ y_train = np.zeros([numSeq, stepEachSeq, output_neurons], dtype=np.float32)
 y_train[:,:,:] = np.roll(x_train, -1, axis=1)[:,:,0:output_neurons]
 y_train[:,-1,:] = y_train[:,-2,:]
 
+
+############These lines create an input only on step 0 ################################
+#new_x_train = np.zeros((x_train.shape[0], x_train.shape[1], x_train.shape[2]))
+#new_x_train[:,:,0] = x_train[:,:,0]
+#x_train[:,:,:] = new_x_train[:,:,:]
+#########################################################################################
+
 #x_train[:, 1:100, :] = x_train[:, 0:99, :] 
 
+jumps = 0
+
 if TEST_MISSING_SENTENCES:
-    y_mod, control_mod, numSeqmod =removeCases(y_train, control_input, numSeq, stepEachSeq, lang_dim2)
+    y_mod, x_mod, control_mod, numSeqmod, jumps =removeCases(y_train, x_train, control_input, numSeq, stepEachSeq, lang_dim2, numCombinationsMiss)
 elif USING_BIG_BATCH:
     x_mod, y_mod, control_mod = create_batch(x_train, y_train, control_input, batch_size)
     numSeqmod = batch_size
@@ -366,9 +408,10 @@ else:
     control_mod = control_input
     numSeqmod = numSeq
 
-#plt.ion()
-#plt.figure()
-#plt.show()
+plt.ion()
+fig = plt.figure()
+ax = plt.subplot(1,1,1)
+fig.show()
 loss_list = []
 
 threshold = 0.0005
@@ -378,6 +421,8 @@ MTRNN.sess.run(tf.global_variables_initializer())
 standard_input = np.zeros([numSeqmod, stepEachSeq, lang_input], dtype = np.float32)
 
 init_state_IO = np.zeros([numSeqmod, lang_input], dtype = np.float32)
+#for i in range(numSeqmod):
+#    init_state_IO[i, :] = x_mod[i, 0, :]
 init_state_fc = np.zeros([numSeqmod, lang_dim1], dtype = np.float32)
 init_state_sc = np.zeros([numSeqmod, lang_dim2], dtype = np.float32)
 for i in range(numSeqmod):
@@ -386,6 +431,8 @@ for i in range(numSeqmod):
 
 best_loss = 10000000.0
 epoch_idx = 0
+best_epoch = 0
+max_error_threshold = 10000000.0 # just a limit to prevent network exploding to NaN
 print(np.shape(x_train))
 raw_input()
 while best_loss > threshold:
@@ -399,12 +446,16 @@ while best_loss > threshold:
     print("Current best loss: ",best_loss)
     print("#################################")
     print("epoch "+str(epoch_idx)+", loss: "+str(total_loss))
-    #plot(loss_list)
+    plot(loss_list, fig, ax)
     if total_loss < best_loss: # only save when loss is lower
         model_path = my_path + "/mtrnn_"+str(epoch_idx) + "_loss_" + str(total_loss)
         save_path = MTRNN.saver.save(MTRNN.sess, model_path)
         best_loss = total_loss
+        best_epoch = epoch_idx
     epoch_idx += 1
+    #if total_loss > max_error_threshold:
+    #    MTRNN.saver.restore(MTRNN.sess, save_path)
+    #    epoch_idx = best_epoch # this might be changed if I see it never ends
     if epoch_idx > NEPOCH:
         break
     if np.isnan(_total_loss):
@@ -415,13 +466,17 @@ while best_loss > threshold:
 # TEST #
 # TEST #
 
+plt.ioff()
+fig.show()
 print("testing")
 MTRNN.saver.restore(MTRNN.sess, save_path)
 
 
 standard_input = np.zeros([1, stepEachSeq, lang_input], dtype = np.float32)
 
-for t in range(numSeq):
+for t in range(0,numSeq, jumps):
+    print("sequence being tested: ", t)
+    raw_input()
     new_output = np.asarray(np.zeros((1, stepEachSeq, output_neurons)),dtype=np.float32)
     new_input = np.asarray(np.zeros((1, stepEachSeq, lang_input)),dtype=np.float32)
     new_input[0, :, :] = x_train[t, :, :]
@@ -432,6 +487,7 @@ for t in range(numSeq):
     old_output[0, :, :] = y_train[t, :, 0:output_neurons]
 
     init_state_IO = np.zeros([1, lang_input], dtype = np.float32)
+#    init_state_IO[0, :] = x_train[t, 0, :]
     init_state_fc = np.zeros([1, lang_dim1], dtype = np.float32)
     init_state_sc = np.zeros([1, lang_dim2], dtype = np.float32)
     init_state_sc[0, :] = control_input[t, 0, :] # store the initial state for each sequence != 0
@@ -443,25 +499,35 @@ for t in range(numSeq):
     output = _logits
 
 
-    plt.ioff()
-    plt.show()
 
-    for i in range(lang_input):
+    #if t == 0:
+    #    stored_results = output[:,:]
+    #if t == 5:
+    #    for i in range(output_neurons):
+    #        plt.plot(output[:, i], 'r')
+   #         plt.plot(stored_results[:, i], 'b')
+    #        plt.plot(old_output[:, i], 'r-.')
+    #        plt.plot(y_train[0, :, i], 'b-.')
+    #        plt.show()
+
+
+    #if t%100 == 0:
+    for i in range(0, output_neurons, 3):
         plt.plot(output[:, i], 'r')
-        plt.plot(old_output[0, :, i], 'r-.')
+        plt.plot(old_output[0, :, i], 'b')
         plt.show()
 
 
     #dataFile.close()
 
     total_error = 0.0
-    for i in range(100):
+    for i in range(stepEachSeq):
         temp_error = 0.0
-        for k in range(2):
+        for k in range(output_neurons):
             #print("data: ", data_softmax[i, k])
             #print("results: ", _softmax[i, k])
             temp_error += np.abs(old_output[0, i, k] - output[i, k])
-        print("error: ", temp_error)
+        #print("error: ", temp_error)
         total_error += temp_error
 
     print("total error: ", total_error)
@@ -490,8 +556,9 @@ U_slow = np.zeros([lang_dim1 + lang_dim2, lang_dim2], dtype = np.float32)
 
 Weights = MTRNN.get_weights()
 for v in Weights:
+    print(v)
     temp_v = v.eval(MTRNN.sess)
-    if (len(temp_v) == lang_dim1 + lang_input):
+    if (len(temp_v) == lang_dim1 + lang_input + lang_input):
         U_input = temp_v
     if (len(temp_v) == lang_dim1 + lang_input + lang_dim2):
         U_fast = temp_v
@@ -504,8 +571,8 @@ totalNeurons = lang_input + lang_dim1 + lang_dim2
 baseline = 0
 bigMatrix = np.zeros((totalinstances, totalNeurons))
 
-bigMatrix[0:lang_input+lang_dim1, 0:lang_input] = U_input[:,:]
-baseline += lang_input+lang_dim1
+bigMatrix[0:lang_input+lang_dim1 + lang_input, 0:lang_input] = U_input[:,:]
+baseline += lang_input+lang_dim1 + lang_input
 bigMatrix[baseline:baseline + lang_dim1 + lang_input + lang_dim2, lang_input:lang_input+lang_dim1] = U_fast[:,:]
 baseline += lang_input+lang_dim1 + lang_dim2
 bigMatrix[baseline:baseline + lang_dim1 + lang_dim2, lang_input+lang_dim1:lang_input + lang_dim1 + lang_dim2] = U_slow[:,:]

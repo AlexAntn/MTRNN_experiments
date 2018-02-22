@@ -138,7 +138,7 @@ class MultiLayerHandler():
                 cur_state = state[i]
                 if i == 0: # IO level, last executed
                     print('IO level')
-                    cur_input = [input_IO] + [state[i+1][0]]
+                    cur_input = [input_IO] + [state[i+1][0]] #[input_IO] + 
                 elif i == self.num_layers - 1: # Highest level
                     print('Highest level')
                     cur_input = [state[i-1][0]]
@@ -272,12 +272,9 @@ class CTRNNModel(object):
         # I will optimise for the cross entropy, as it should be the same from the point of view of the gradients
 
         # FOR KULLBACK-LEIBLER IMPLEMENTATION, SEE BELOW
+        # note: while it follows the trajectory rather well, it seems like it has a constant displacement, probably because softmax "removes" the mean.
         ##################################################
-        #self.logits = rnn_outputs # these should already be transformed by a softmax
         #self.logits = tf.slice(rnn_outputs, [0, 0], [-1, output_dim])
-        #self.cross_entropy = -tf.reduce_sum(self.y_reshaped*tf.log(self.logits + 0.0000001))
-        #self.entropy = -tf.reduce_sum(self.y_reshaped*tf.log(self.y_reshaped + 0.0000001))
-        #self.total_loss = self.cross_entropy - self.entropy
         #self.total_loss = self.kullback_leibler(tf.nn.softmax(self.logits, dim = -1), tf.nn.softmax(self.y_reshaped, dim = -1))
         #tf.summary.scalar('training/total_loss', self.total_loss)
 
@@ -292,10 +289,10 @@ class CTRNNModel(object):
 
 
         self.saver = tf.train.Saver()
-        self.sess = tf.Session()
+        self.sess = tf.Session(config = tf.ConfigProto(log_device_placement=True))
 
     def kullback_leibler(self, x, y):
-        return tf.reduce_sum(y*tf.log((y+0.000001)/(x+0.000001)))
+        return tf.reduce_sum(y*tf.log((y+0.000000001)/(x+0.000000001)))
 
     def zero_state_tuple(self, batch_size):
         """ Returns a tuple og zeros
