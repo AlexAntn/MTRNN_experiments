@@ -336,7 +336,7 @@ class CTRNNModel(object):
                 logits=self.logits, labels=self.y_reshaped))
         tf.summary.scalar('training/total_loss', self.total_loss)
 
-        self.train_op = optimizers.AMSGrad(learning_rate_new).minimize(self.total_loss)
+        self.train_op = optimizers.AMSGrad(learning_rate).minimize(self.total_loss)
         #self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
         self.TBsummaries = tf.summary.merge_all()
 
