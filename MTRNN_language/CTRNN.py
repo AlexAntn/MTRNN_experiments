@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function
 import numpy as np
 import tensorflow as tf
 
+import optimizers
 #from tensorflow.python.ops.rnn_cell_impl import _linear 
     # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/rnn_cell_impl.py
 
@@ -335,7 +336,8 @@ class CTRNNModel(object):
                 logits=self.logits, labels=self.y_reshaped))
         tf.summary.scalar('training/total_loss', self.total_loss)
 
-        self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
+        self.train_op = optimizers.AMSGrad(learning_rate_new).minimize(self.total_loss)
+        #self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
         self.TBsummaries = tf.summary.merge_all()
 
 
