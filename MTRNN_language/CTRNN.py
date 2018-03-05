@@ -3,8 +3,18 @@ from __future__ import absolute_import, division, print_function
 import numpy as np
 import tensorflow as tf
 
-from tensorflow.python.ops.rnn_cell_impl import _linear 
+#from tensorflow.python.ops.rnn_cell_impl import _linear 
     # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/rnn_cell_impl.py
+
+#from tensorflow.contrib.rnn.python.ops.core_rnn_cell_impl import _linear
+
+from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import math_ops
+from tensorflow.python.util import nest
+from tensorflow.python.ops import init_ops
+from tensorflow.python.ops import nn_ops
+from tensorflow.python.ops import variable_scope as vs
+
 
 class CTRNNCell(tf.nn.rnn_cell.RNNCell):
     """ API Conventions: https://github.com/tensorflow/tensorflow/blob/r1.2/tensorflow/python/ops/rnn_cell_impl.py
@@ -71,7 +81,8 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
             # print()
 
             with tf.variable_scope('linear'):
-                logits = _linear(inputs + [old_c], output_size=self.output_size, bias=False, kernel_initializer=tf.random_uniform_initializer(-0.025, 0.025))
+                logits = self._linear(inputs + [old_c], output_size=self.output_size, bias=True)
+                #gate_inputs = math_ops.matmul(array_ops.concat([inputs, old_c], 1), self._kernel)
 
             with tf.variable_scope('applyTau'):
                 new_u = (1-1/self.tau)*old_u + 1/self.tau*logits
@@ -79,6 +90,57 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
             new_c = self.activation(new_u)
 
         return new_c, (new_c, new_u)
+
+    def _linear(self, args, output_size, bias, bias_start=0.0):
+        """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
+        Args:
+            args: a 2D Tensor or a list of 2D, batch x n, Tensors.
+            output_size: int, second dimension of W[i].
+            bias: boolean, whether to add a bias term or not.
+            bias_start: starting value to initialize the bias; 0 by default.
+        Returns:
+            A 2D Tensor with shape [batch x output_size] equal to
+            sum_i(args[i] * W[i]), where W[i]s are newly created matrices.
+        Raises:
+            ValueError: if some of the arguments has unspecified or wrong shape.
+        """
+        if args is None or (nest.is_sequence(args) and not args):
+            raise ValueError("`args` must be specified")
+        if not nest.is_sequence(args):
+            args = [args]
+
+        # Calculate the total size of arguments on dimension 1.
+        total_arg_size = 0
+        shapes = [a.get_shape() for a in args]
+        for shape in shapes:
+            if shape.ndims != 2:
+                raise ValueError("linear is expecting 2D arguments: %s" % shapes)
+            if shape[1].value is None:
+                raise ValueError("linear expects shape[1] to be provided for shape %s, "
+                                 "but saw %s" % (shape, shape[1]))
+            else:
+                total_arg_size += shape[1].value
+
+        dtype = [a.dtype for a in args][0]
+
+        # Now the computation.
+        scope = vs.get_variable_scope()
+        with vs.variable_scope(scope) as outer_scope:
+            weights = vs.get_variable(
+                'weights', [total_arg_size, output_size], dtype=dtype)
+            if len(args) == 1:
+                res = math_ops.matmul(args[0], weights)
+            else:
+                res = math_ops.matmul(array_ops.concat(args, 1), weights)
+            if not bias:
+                return res
+            with vs.variable_scope(outer_scope) as inner_scope:
+                inner_scope.set_partitioner(None)
+                biases = vs.get_variable(
+                    'biases', [output_size],
+                    dtype=dtype,
+                    initializer=init_ops.constant_initializer(bias_start, dtype=dtype))
+            return nn_ops.bias_add(res, biases)
 
 def shape_printer(obj, prefix):
     try:
@@ -127,7 +189,7 @@ class MultiLayerHandler():
         #     zero_states += l.zero_state(batch_size)
         # return zero_states
 
-    def __call__(self, input_IO, state, scope=None):
+    def __call__(self, inputs, state, scope=None):
 
         with tf.variable_scope(scope or type(self).__name__):
             out_state = []
@@ -138,10 +200,11 @@ class MultiLayerHandler():
                 cur_state = state[i]
                 if i == 0: # IO level, last executed
                     print('IO level')
-                    cur_input = [input_IO] + [state[i+1][0]] #[input_IO] + 
+                    cur_input = [state[i+1][0]]
                 elif i == self.num_layers - 1: # Highest level
                     print('Highest level')
-                    cur_input = [state[i-1][0]]
+                    cur_input = [inputs] + [state[i-1][0]]
+                    # print(cur_input)
                 else: # Inbetween layers
                     cur_input = [state[i-1][0]] + [state[i+1][0]]
 
@@ -166,7 +229,6 @@ class MultiLayerHandler():
 
 class CTRNNModel(object):
     def __init__(self, num_units, tau, num_steps, input_dim, output_dim, learning_rate=1e-4):
-        #with tf.device('/cpu:0'):
         """ Assumptions
             * x is 3 dimensional: [batch_size, num_steps] 
             Args:
@@ -179,11 +241,10 @@ class CTRNNModel(object):
 
         self.output_dim = output_dim 
         self.activation = lambda x: 1.7159 * tf.tanh(2/3 * x)
-        #self.activation = lambda x: tf.sigmoid(x)
 
         self.x = tf.placeholder(tf.float32, shape=[None, num_steps, input_dim], name='inputPlaceholder')
-        self.y = tf.placeholder(tf.float32, shape=[None, num_steps, output_dim], name='outputPlaceholder')
-        self.y_reshaped = tf.reshape(tf.transpose(self.y, [1, 0, 2]), [-1, output_dim])
+        self.y = tf.placeholder(tf.int32, shape=[None, num_steps], name='outputPlaceholder')
+        self.y_reshaped = tf.reshape(tf.transpose(self.y, [1,0]), [-1])
         #self.y_reshaped = tf.reshape(self.y, [-1])
 
         init_input = tf.placeholder(tf.float32, shape=[None, self.num_units[0]], name='initInput')
@@ -193,9 +254,9 @@ class CTRNNModel(object):
             init_u = tf.placeholder(tf.float32, shape=[None, num_unit], name='initU_' + str(i))
             init_state += [(init_c, init_u)]
         init_state = tuple(init_state)
-        #print('init_input', init_input.get_shape())
+        print('init_input', init_input.get_shape())
         #print('init_state[3][0]', init_state[3][0].get_shape())
-        #print()
+        print()
 
         self.init_tuple = (init_input, init_state)
 
@@ -219,17 +280,12 @@ class CTRNNModel(object):
         # self.init_tuple = (init_input, (init_c, init_u))
         # print(init_state[0])
         # print((init_c, init_u))
-        W = tf.get_variable('W', [num_units[0], num_units[0]], tf.float32)
 
         cells = []
         for i in range(self.num_layers): 
             num_unit = num_units[i]
             tau = self.tau[i]
-            if i == 0:
-                cells += [CTRNNCell(num_unit, tau=tau, activation=lambda x:tf.matmul(x, W))]
-            else:
-                cells += [CTRNNCell(num_unit, tau=tau, activation=self.activation)]
-            #cells += [CTRNNCell(num_unit, tau=tau, activation=self.activation)]
+            cells += [CTRNNCell(num_unit, tau=tau, activation=self.activation)]
         self.cell = MultiLayerHandler(cells) # First cell (index 0) is IO layer
 
         # print('x', self.x.get_shape())
@@ -237,8 +293,6 @@ class CTRNNModel(object):
         # print('init_tuple[0]', self.init_tuple[0].get_shape())
         # print('init_tuple[1][0]', self.init_tuple[1][0].get_shape())
         # print('init_tuple[1][1]', self.init_tuple[1][1].get_shape())
-        
-        #self.x = tf.nn.softmax(self.x, dim=-1)
         
         self.rnn_outputs, self.final_states = tf.scan(
             lambda state, x: self.cell(x, state[1]),
@@ -268,35 +322,25 @@ class CTRNNModel(object):
         # print('shape_printer: self.state_tuple')
         # shape_printer(self.state_tuple, 'st')
 
+
         rnn_outputs = tf.cast(tf.reshape(self.rnn_outputs, [-1, num_units[0]]), tf.float32)
 
-        # I will optimise for the cross entropy, as it should be the same from the point of view of the gradients
-
-        # FOR KULLBACK-LEIBLER IMPLEMENTATION, SEE BELOW
-        # note: while it follows the trajectory rather well, it seems like it has a constant displacement, probably because softmax "removes" the mean.
-        ##################################################
-        #self.logits = tf.slice(rnn_outputs, [0, 0], [-1, output_dim])
-        #self.total_loss = self.kullback_leibler(tf.nn.softmax(self.logits, dim = -1), tf.nn.softmax(self.y_reshaped, dim = -1))
-        #tf.summary.scalar('training/total_loss', self.total_loss)
-
-        # FOR MSE SEE BELOW
-        #####################################
-        self.logits = tf.slice(rnn_outputs, [0, 0], [-1, output_dim])
-        self.total_loss = tf.reduce_sum(tf.square(tf.subtract(self.y_reshaped, self.logits)))
+        with tf.variable_scope('softmax'):
+            W = tf.get_variable('W', [num_units[0], output_dim], tf.float32)
+            b = tf.get_variable('b', [output_dim], initializer=tf.constant_initializer(0.0, tf.float32))
+            self.logits = tf.matmul(rnn_outputs, W) + b
+            self.softmax = tf.nn.softmax(self.logits, dim=-1)
+            self.labels_y = self.y_reshaped
+        self.total_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+                logits=self.logits, labels=self.y_reshaped))
         tf.summary.scalar('training/total_loss', self.total_loss)
 
         self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
         self.TBsummaries = tf.summary.merge_all()
 
-        #config = tf.ConfigProto()
-        #config.gpu_options.allow_growth = True
 
-        self.saver = tf.train.Saver()
-        self.sess = tf.Session()#config = config)
-
-
-    def kullback_leibler(self, x, y):
-        return tf.reduce_sum(y*tf.log((y+0.000000001)/(x+0.000000001)))
+        self.saver = tf.train.Saver(max_to_keep = 1)
+        self.sess = tf.Session()
 
     def zero_state_tuple(self, batch_size):
         """ Returns a tuple og zeros
@@ -311,6 +355,6 @@ class CTRNNModel(object):
 
         zero_state = tuple(zero_state)
         return (zero_input, zero_state)
-
-    def get_weights(self):
-        return [v for v in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) if v.name.endswith('kernel:0')]
+        # output = np.zeros([batch_size, self.num_units[0]])
+        # state = np.zeros([batch_size, self.num_units[0]])
+# return (output, (output, state))
