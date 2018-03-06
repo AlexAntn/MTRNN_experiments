@@ -86,7 +86,7 @@ def loadTrainingData():
 
 
     numInputNeurons = 29 # language neurons, 26 for letters plus space and stop plus "nothing"
-    numControlNeurons = 30 
+    numControlNeurons = 45 
     stepEachSeq = 30
 
 
@@ -175,19 +175,20 @@ x_train, y_train, numSeq, stepEachSeq, control_input = loadTrainingData()
 print("data loaded")
 
 lang_input = 29 # I/O layer
-lang_dim1 = 100 # fast context
-lang_dim2 = 30 # slow context (without control neurons)
-#control_dim = 3 # control neurons
+input_layer = 40
+lang_dim1 = 160 # fast context
+lang_dim2 = 45 # slow context (without control neurons)
+control_dim = 8 # control neurons
 
 LEARNING_RATE = 5 * 1e-3
 
-NEPOCH = 20000 # number of times to train each sentence
+NEPOCH = 80000 # number of times to train each sentence
     
 my_path= os.getcwd()
 figure_path = os.path.join(my_path, "matrix/")
 
 
-MTRNN = CTRNNModel([lang_input, lang_dim1, lang_dim2], [2, 5, 60], stepEachSeq, lang_dim2, lang_input, LEARNING_RATE)
+MTRNN = CTRNNModel([input_layer, lang_dim1, lang_dim2], [2, 5, 60], stepEachSeq, lang_dim2, lang_input, control_dim, LEARNING_RATE)
 
 
 plt.ion()
@@ -196,38 +197,83 @@ ax = plt.subplot(1,1,1)
 fig.show()
 
 loss_list = []
+lang_loss_list = [5.0]
+cs_loss_list = [5.0]
 
-threshold = 0.001
+threshold = 0.0005
 
 MTRNN.sess.run(tf.global_variables_initializer())
 
 print("control sequences:", control_input[:,0,0:8])
 raw_input()
 
+final_seq = np.zeros([numSeq, control_dim])
+for i in range(numSeq):
+    final_seq[i,:] = control_input[i, 0, 0:8]
 
-init_state_IO = np.zeros([numSeq, lang_input], dtype = np.float32)
+
+init_state_IO = np.zeros([numSeq, input_layer], dtype = np.float32)
 init_state_fc = np.zeros([numSeq, lang_dim1], dtype = np.float32)
 init_state_sc = np.zeros([numSeq, lang_dim2], dtype = np.float32)
 #init_state_cn = np.zeros([numSeq, control_dim], dtype = np.float32)
 
-best_loss = 0.015
+######################################### Control Variables ################################
+direction = True
+test = False
+alpha = 1
+
+average_loss = 1000.0
+
+best_loss = 0.07
 epoch_idx = 0
 while best_loss > threshold:
     print("Training epoch " + str(epoch_idx))
+    if direction:
+        inputs = np.zeros([numSeq, stepEachSeq, lang_input], dtype = np.float32)
+        cs_inputs = control_input
+    else:
+        inputs = x_train
+        cs_inputs = np.zeros([numSeq, stepEachSeq, lang_dim2], dtype = np.float32)
+
     t0 = datetime.datetime.now()
-    _total_loss, _train_op, _state_tuple, _softmax, _logits = MTRNN.sess.run([MTRNN.total_loss, MTRNN.train_op, MTRNN.state_tuple, MTRNN.softmax, MTRNN.logits], feed_dict={MTRNN.x:control_input, MTRNN.y:y_train, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
+    _total_loss, _train_op, _state_tuple = MTRNN.sess.run([MTRNN.total_loss, MTRNN.train_op, MTRNN.state_tuple], feed_dict={MTRNN.x:cs_inputs, MTRNN.y:y_train, MTRNN.sentence:inputs, MTRNN.direction:direction, MTRNN.final_seq:final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
     t1 = datetime.datetime.now()
     print("epoch time: ", (t1-t0).total_seconds())
+    if direction:
+        loss = _total_loss
+        new_loss = loss
+        if loss > 5:
+            new_loss = 5
+        lang_loss_list.append(new_loss)
+    else:
+        loss = _total_loss
+        new_loss = loss
+        if loss > 5:
+            new_loss = 5
+        cs_loss_list.append(new_loss)
+    if epoch_idx%2 == 0:
+        average_loss = alpha*lang_loss_list[-1] + (1-alpha)*cs_loss_list[-1]
     loss_list.append(_total_loss)
     print("Current best loss: ",best_loss)
     print("#################################")
-    print("epoch "+str(epoch_idx)+", loss: "+str(_total_loss))
+    print("epoch "+str(epoch_idx)+", loss: "+str(loss))
     #plot(loss_list, fig, ax)
-    if _total_loss < best_loss: # only save when loss is lower
-        model_path = my_path + "/mtrnn_"+str(epoch_idx) + "_loss_" + str(_total_loss)
+    if average_loss < best_loss and lang_loss_list[-1] < 0.010: # only save when loss is lower
+        model_path = my_path + "/mtrnn_"+str(epoch_idx) + "_loss_" + str(average_loss)
         save_path = MTRNN.saver.save(MTRNN.sess, model_path)
-        best_loss = _total_loss
+        best_loss = average_loss
     epoch_idx += 1
+
+    if cs_loss_list[-1] < 2*lang_loss_list[-1]:
+        direction = True
+        if epoch_idx%10 == 0:
+            direction = not direction
+
+    if lang_loss_list[-1] < 2*cs_loss_list[-1] or lang_loss_list[-1] < 0.010:
+        direction = False
+        if epoch_idx%10 == 0:
+            direction = not direction
+
     t2 = datetime.datetime.now()
     print("saving time: ", (t2-t1).total_seconds())
     if epoch_idx > NEPOCH:
@@ -236,41 +282,45 @@ plot(loss_list, fig, ax)
 
 # TEST #
 
+MTRNN.saver.restore(MTRNN.sess, save_path)
+plt.ioff()
+plt.show()
 print("testing")
+test=True
 
 
-init_state_IO = np.zeros([1, lang_input], dtype = np.float32)
+init_state_IO = np.zeros([1, input_layer], dtype = np.float32)
 init_state_fc = np.zeros([1, lang_dim1], dtype = np.float32)
 init_state_sc = np.zeros([1, lang_dim2], dtype = np.float32)
 #init_state_cn = np.zeros([1, control_dim], dtype = np.float32)
 
-for i in range(0, numSeq, 6):
+for i in range(0, numSeq, 1):
     new_output = np.asarray(np.zeros((1, stepEachSeq)),dtype=np.int32)
     new_input = np.asarray(np.zeros((1, stepEachSeq, lang_dim2)),dtype=np.float32)
+    new_sentence = np.asarray(np.zeros((1, stepEachSeq, lang_input)), dtype=np.float32)
+    new_final_seq = np.asarray(np.zeros((1, control_dim)), dtype=np.float32)
     new_input[0, :, :] = control_input[i, :, :]
     new_output[0, :] = y_train[i, :]
     #print(new_output)
     #print(new_input)
+    
+    new_final_seq[0,:] = control_input[i, 0, 0:8]
 
-    if i == 0:
-        new_output = np.asarray(np.zeros((1, stepEachSeq)),dtype=np.int32)
-        new_input = np.asarray(np.zeros((1, stepEachSeq, lang_dim2)),dtype=np.float32)
-        new_input[0, :, 0:8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0]
-        #new_output[0, :] = y_train[i, :]
+    #if i == 0:
+    #    new_output = np.asarray(np.zeros((1, stepEachSeq)),dtype=np.int32)
+    #    new_input = np.asarray(np.zeros((1, stepEachSeq, lang_dim2)),dtype=np.float32)
+    #    new_input[0, :, 0:8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    #    #new_output[0, :] = y_train[i, :]
 
-    _total_loss, _state_tuple, _softmax, _logits, _labels_y = MTRNN.sess.run([MTRNN.total_loss, MTRNN.state_tuple, MTRNN.softmax, MTRNN.logits, MTRNN.labels_y], feed_dict={MTRNN.x:new_input, MTRNN.y:new_output, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
+    direction = True
 
-    #print(_labels_y)
-    #print(_logits)
+    _state_tuple, _softmax, _logits = MTRNN.sess.run([MTRNN.state_tuple, MTRNN.softmax, MTRNN.logits], feed_dict={MTRNN.x:new_input, MTRNN.y:new_output, MTRNN.sentence:new_sentence, MTRNN.direction:direction, MTRNN.final_seq:new_final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
+
     sentence = ""
-    #if i%30 == 0:
-    #    print(sentence)
-    #    print("########################")
-    #    sentence = ""
     print("Sequence:", new_input[:,0,0:8])
     for i in range(stepEachSeq):
         for g in range(29):
-            if _softmax[i,g] == max(_softmax[i]): #and max(_softmax[i]) > 0.6:
+            if _softmax[i,g] == max(_softmax[i]): 
                 if g <27:
                     sentence += chr(96 + g)
                 if g == 27:
@@ -281,42 +331,15 @@ for i in range(0, numSeq, 6):
     print("########################")
 
 
-#print("save path for model: ",save_path)
+    direction = False
+    new_input = np.asarray(np.zeros((1, stepEachSeq, lang_dim2)),dtype=np.float32)
+    new_sentence[0, :, :] = x_train[i, :, :]
 
-#MTRNNTest = CTRNNModelTest([lang_input, lang_dim1, lang_dim2, control_dim], [2, 5, 60, 60], stepEachSeq, control_dim, lang_input, LEARNING_RATE, numSeq)
+    _state_tuple, _logits_cs = MTRNN.sess.run([MTRNN.state_tuple, MTRNN.logits_cs], feed_dict={MTRNN.x:new_input, MTRNN.y:new_output, MTRNN.sentence:new_sentence, MTRNN.direction:direction, MTRNN.final_seq:new_final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
 
-#tf.reset_default_graph()
-#MTRNNTest.saver.restore(MTRNNTest.sess, save_path)
+    print("output: ", _logits_cs[-1, 0:8])
+    print("test: ", new_final_seq[0,:])
 
-#for i in range(numSeq):
-
-#new_output_temp = np.asarray(np.zeros((numSeq  , stepEachSeq)),dtype=np.int32)
-#new_input_temp = np.asarray(np.zeros((numSeq, stepEachSeq, control_dim)),dtype=np.float32)
-#new_output_temp[1, :] = y_train[4, :]
-#new_input_temp[1, :, :] = control_input[4, :, :]
-
-#_total_loss, _state_tuple, _softmax, _logits, _labels_y = MTRNNTest.sess.run([MTRNNTest.total_loss, MTRNNTest.state_tuple, MTRNNTest.softmax, MTRNNTest.logits, MTRNNTest.labels_y], feed_dict={MTRNNTest.x:new_input_temp, MTRNNTest.y:new_output_temp})
-#
-#print(_labels_y)
-#print(_logits)
-#sentence = ""
-#for i in range(numSeq*30):
-#    if i%30 == 0:
-#        print(sentence)
-#        print("########################")
-#        sentence = ""
-#    for g in range(29):
-#        if _softmax[i,g] == max(_softmax[i]): #and max(_softmax[i]) > 0.6:
-#            if g <27:
-#                sentence += chr(96 + g)
-#            if g == 27:
-#                sentence += " "
-#            if g == 28:
-#                sentence += "."
-#print(sentence)
-
-#plt.ioff()
-#plt.show()
 MTRNN.sess.close()
 #MTRNNTest.sess.close()
 

@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function
 import numpy as np
 import tensorflow as tf
 
-import optimizers
 #from tensorflow.python.ops.rnn_cell_impl import _linear 
     # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/rnn_cell_impl.py
 
@@ -190,33 +189,68 @@ class MultiLayerHandler():
         #     zero_states += l.zero_state(batch_size)
         # return zero_states
 
-    def __call__(self, inputs, state, scope=None):
+    def __call__(self, inputs, state, scope=None, reverse = True):
 
         with tf.variable_scope(scope or type(self).__name__):
             out_state = []
-            for i_, l in enumerate(reversed(self.layers)): # Start with the top level
-                i = self.num_layers - i_ - 1
-                scope = 'CTRNNCell_' + str(i)
+            outputs = [[],[]]
+            print("inputs[0]:", np.shape(inputs[0]))
+            print("inputs[1]:", np.shape(inputs[1]))
+            if reverse:
+                for i_, l in enumerate(reversed(self.layers)): # Start with the top level
+                    i = self.num_layers - i_ - 1
+                    scope = 'CTRNNCell_' + str(i)
 
-                cur_state = state[i]
-                if i == 0: # IO level, last executed
-                    print('IO level')
-                    cur_input = [state[i+1][0]]
-                elif i == self.num_layers - 1: # Highest level
-                    print('Highest level')
-                    cur_input = [inputs] + [state[i-1][0]]
-                    # print(cur_input)
-                else: # Inbetween layers
-                    cur_input = [state[i-1][0]] + [state[i+1][0]]
+                    cur_state = state[i]
+                    if i == 0: # IO level, last executed
+                        print('IO level')
+                        cur_input = [inputs[1]] + [state[i+1][0]]
+                        outputs1, state_ = l(cur_input, cur_state, scope=scope)
+                    elif i == self.num_layers - 1: # Highest level
+                        print('Highest level')
+                        cur_input = [inputs[0]] + [state[i-1][0]]
+                        outputs2, state_ = l(cur_input, cur_state, scope=scope)
+                        # print(cur_input)
+                    else: # Inbetween layers
+                        cur_input = [state[i-1][0]] + [state[i+1][0]]
+                        outputs3, state_ = l(cur_input, cur_state, scope=scope)
 
-                outputs, state_ = l(cur_input, cur_state, scope=scope)
-                # print('state_', type(state_))
-                # print('state_[0]', state_[0].get_shape())
-                out_state += [state_]
+                    # print('state_', type(state_))
+                    # print('state_[0]', state_[0].get_shape())
+                    out_state += [state_]
 
-            out_state = tuple(reversed(out_state))
+                out_state = tuple(reversed(out_state))
 
-            print('outputs', outputs.get_shape())
+            else:
+                for i_, l in enumerate(self.layers): # Start with the top level
+                    i = i_ 
+                    scope = 'CTRNNCell_' + str(i)
+
+                    cur_state = state[i]
+                    print("state[0]:", np.shape(cur_state[0]))
+                    print("state[1]:", np.shape(cur_state[1]))
+                    if i == 0: # IO level, last executed
+                        print('IO level')
+                        cur_input = [inputs[1]] + [state[i+1][0]]
+                        outputs1, state_ = l(cur_input, cur_state, scope=scope)
+                    elif i == self.num_layers - 1: # Highest level
+                        print('Highest level')
+                        cur_input = [inputs[0]] + [state[i-1][0]]
+                        outputs2, state_ = l(cur_input, cur_state, scope=scope)
+                        # print(cur_input)
+                    else: # Inbetween layers
+                        cur_input = [state[i-1][0]] + [state[i+1][0]]
+                        outputs3, state_ = l(cur_input, cur_state, scope=scope)
+
+                    # print('state_', type(state_))
+                    # print('state_[0]', state_[0].get_shape())
+                    out_state += [state_]
+
+                out_state = tuple(out_state)
+
+            outputs = [outputs2, outputs1]
+            print('outputs[0]:', outputs[0])
+            print('outputs[1]:', outputs[1])
             print('out_state')
             shape_printer(out_state, 'MLH')
             return outputs, out_state
@@ -229,7 +263,7 @@ class MultiLayerHandler():
 
 
 class CTRNNModel(object):
-    def __init__(self, num_units, tau, num_steps, input_dim, output_dim, learning_rate=1e-4):
+    def __init__(self, num_units, tau, num_steps, input_dim, output_dim, output_dim2, learning_rate=1e-4):
         """ Assumptions
             * x is 3 dimensional: [batch_size, num_steps] 
             Args:
@@ -240,47 +274,37 @@ class CTRNNModel(object):
         self.num_layers = len(self.num_units)
         self.tau = tau
 
+        self.input_dim = input_dim
         self.output_dim = output_dim 
         self.activation = lambda x: 1.7159 * tf.tanh(2/3 * x)
 
         self.x = tf.placeholder(tf.float32, shape=[None, num_steps, input_dim], name='inputPlaceholder')
+        self.x_reshaped = tf.reshape(tf.transpose(self.x, [1,0,2]), [-1])
+
+        self.sentence = tf.placeholder(tf.float32, shape = [None, num_steps, output_dim], name = 'sentencePlaceholder')
+
         self.y = tf.placeholder(tf.int32, shape=[None, num_steps], name='outputPlaceholder')
         self.y_reshaped = tf.reshape(tf.transpose(self.y, [1,0]), [-1])
         #self.y_reshaped = tf.reshape(self.y, [-1])
 
-        init_input = tf.placeholder(tf.float32, shape=[None, self.num_units[0]], name='initInput')
+        self.final_seq = tf.placeholder(tf.float32, shape = [None, output_dim2], name = 'finalSequence')
+
+        self.direction = tf.placeholder(tf.bool, shape=())
+        # true means generating a sentence from a cs
+        # false means generating a cs from a sentence
+
+
+        init_input_sentence = tf.placeholder(tf.float32, shape=[None, self.num_units[0]], name='initInputSent')
+        init_input_cs = tf.placeholder(tf.float32, shape=[None, self.num_units[2]], name = 'initInputCS')
+        init_input = [init_input_cs, init_input_sentence]
         init_state = []
         for i, num_unit in enumerate(self.num_units):
             init_c = tf.placeholder(tf.float32, shape=[None, num_unit], name='initC_' + str(i))
             init_u = tf.placeholder(tf.float32, shape=[None, num_unit], name='initU_' + str(i))
             init_state += [(init_c, init_u)]
         init_state = tuple(init_state)
-        print('init_input', init_input.get_shape())
-        #print('init_state[3][0]', init_state[3][0].get_shape())
-        print()
 
         self.init_tuple = (init_input, init_state)
-
-        #zero_input = np.zeros([None, self.num_units[0]], dtype = np.float32)
-
-        #zero_state = []
-        #for i, num_unit in enumerate(self.num_units):
-        #    zero_c = np.zeros([None, self.num_units[i]], dtype = np.float32)
-        #    zero_u = np.zeros([None, self.num_units[i]], dtype = np.float32)
-        #    zero_state += [(zero_c, zero_u)]
-
-        #zero_state = tuple(zero_state)
-        #self.init_tuple = (zero_input, zero_state)
-
-        #init_state = self.zero_state_tuple(batch_size)#(init_input, init_state)
-        #self.init_tuple = init_state
-        # self.init_tuple = (init_input, init_state[0])
-
-        # init_c = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initC_')
-        # init_u = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initU_')
-        # self.init_tuple = (init_input, (init_c, init_u))
-        # print(init_state[0])
-        # print((init_c, init_u))
 
         cells = []
         for i in range(self.num_layers): 
@@ -288,20 +312,15 @@ class CTRNNModel(object):
             tau = self.tau[i]
             cells += [CTRNNCell(num_unit, tau=tau, activation=self.activation)]
         self.cell = MultiLayerHandler(cells) # First cell (index 0) is IO layer
-
-        # print('x', self.x.get_shape())
-        # print('init_tuple', type(self.init_tuple))
-        # print('init_tuple[0]', self.init_tuple[0].get_shape())
-        # print('init_tuple[1][0]', self.init_tuple[1][0].get_shape())
-        # print('init_tuple[1][1]', self.init_tuple[1][1].get_shape())
         
-        self.rnn_outputs, self.final_states = tf.scan(
-            lambda state, x: self.cell(x, state[1]),
-            tf.transpose(self.x, [1, 0, 2]),
-            # tf.transpose(x, [1, 0] + [i+2 for i in range(x_shape.shape[0]-2)]),
-                # We need shape = [num_seq, batch_size, ...]
-            initializer=self.init_tuple
-        )
+        with tf.variable_scope("scan", reuse = tf.AUTO_REUSE):
+            self.rnn_outputs, self.final_states = tf.cond(self.direction,
+            lambda: tf.scan(lambda state, x: self.cell(x, state[1], reverse = True),
+            [tf.transpose(self.x, [1, 0, 2]), tf.transpose(self.sentence, [1,0,2])],
+            initializer=self.init_tuple), 
+            lambda: tf.scan(lambda state, x: self.cell(x, state[1], reverse = False), 
+            [tf.transpose(self.x, [1, 0, 2]), tf.transpose(self.sentence, [1,0,2])],
+            initializer=self.init_tuple))
 
         # print('self.rnn_outputs[-1]', self.rnn_outputs[-1].shape)
         # print('self.final_states', type(self.final_states))
@@ -318,31 +337,46 @@ class CTRNNModel(object):
         for i in range(self.num_layers):
             state_state += [(self.final_states[i][0][-1], self.final_states[i][1][-1])]
         state_state = tuple(state_state)
-        self.state_tuple = (self.rnn_outputs[-1], state_state)
+        self.state_tuple = (self.rnn_outputs[:][-1], state_state)
 
         # print('shape_printer: self.state_tuple')
         # shape_printer(self.state_tuple, 'st')
 
+        rnn_outputs_sentence = self.rnn_outputs[1]
+        rnn_outputs_sentence = tf.cast(tf.reshape(rnn_outputs_sentence, [-1, num_units[0]]), tf.float32)
+        rnn_outputs_sentence = tf.slice(rnn_outputs_sentence, [0, 0], [-1, output_dim])
+        
+        rnn_outputs_cs = self.rnn_outputs[0][num_steps-1]
+        rnn_outputs_cs = tf.slice(rnn_outputs_cs, [0,0], [-1, output_dim2])
 
-        rnn_outputs = tf.cast(tf.reshape(self.rnn_outputs, [-1, num_units[0]]), tf.float32)
-
+###############################################################################
         with tf.variable_scope('softmax'):
-            W = tf.get_variable('W', [num_units[0], output_dim], tf.float32)
+            W = tf.get_variable('W', [output_dim, output_dim], tf.float32)
             b = tf.get_variable('b', [output_dim], initializer=tf.constant_initializer(0.0, tf.float32))
-            self.logits = tf.matmul(rnn_outputs, W) + b
+            self.logits = tf.matmul(rnn_outputs_sentence, W) + b
             self.softmax = tf.nn.softmax(self.logits, dim=-1)
-            self.labels_y = self.y_reshaped
-        self.total_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-                logits=self.logits, labels=self.y_reshaped))
+            #self.labels_y = self.y_reshaped
+        #self.total_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+                #logits=self.logits, labels=self.y_reshaped))
+        #tf.summary.scalar('training/total_loss', self.total_loss)
+#################################################################################
+
+        self.logits_cs = rnn_outputs_cs
+        
+################################################################################
+
+        self.total_loss = tf.cond(self.direction, lambda: tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits, labels=self.y_reshaped)), lambda: tf.reduce_sum(tf.square(tf.subtract(self.final_seq, self.logits_cs))))
         tf.summary.scalar('training/total_loss', self.total_loss)
 
-        self.train_op = optimizers.AMSGrad(learning_rate).minimize(self.total_loss)
-        #self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
+        self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
         self.TBsummaries = tf.summary.merge_all()
 
 
-        self.saver = tf.train.Saver(max_to_keep = 1)
-        self.sess = tf.Session()
+        config = tf.ConfigProto(log_device_placement = True, allow_soft_placement=True)
+        config.gpu_options.per_process_gpu_memory_fraction = 0.10
+
+        self.saver = tf.train.Saver(max_to_keep=1)
+        self.sess = tf.Session(config = config)
 
     def zero_state_tuple(self, batch_size):
         """ Returns a tuple og zeros
@@ -360,3 +394,4 @@ class CTRNNModel(object):
         # output = np.zeros([batch_size, self.num_units[0]])
         # state = np.zeros([batch_size, self.num_units[0]])
 # return (output, (output, state))
+
