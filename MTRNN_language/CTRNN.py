@@ -3,11 +3,6 @@ from __future__ import absolute_import, division, print_function
 import numpy as np
 import tensorflow as tf
 
-#from tensorflow.python.ops.rnn_cell_impl import _linear 
-    # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/rnn_cell_impl.py
-
-#from tensorflow.contrib.rnn.python.ops.core_rnn_cell_impl import _linear
-
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.util import nest
@@ -15,7 +10,7 @@ from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import variable_scope as vs
 
-
+import optimizers
 
 class CTRNNCell(tf.nn.rnn_cell.RNNCell):
     """ API Conventions: https://github.com/tensorflow/tensorflow/blob/r1.2/tensorflow/python/ops/rnn_cell_impl.py
@@ -74,12 +69,6 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
         with tf.variable_scope(scope or type(self).__name__):
             old_c = state[0]
             old_u = state[1]
-            # print(scope)
-            # print('inputs', len(inputs), inputs[0].get_shape())
-            # print('state', type(state))
-            # print('state[0]', state[0].get_shape())
-            # print('state[1]', state[1].get_shape())
-            # print()
 
             with tf.variable_scope('linear'):
                 logits = self._linear(inputs + [old_c], output_size=self.output_size, bias=False)
@@ -194,10 +183,6 @@ class MultiLayerHandler():
         with tf.variable_scope(scope or type(self).__name__):
             out_state = []
             outputs = [[],[]]
-            #print("inputs[0]:", np.shape(inputs[0]))
-            #print("inputs[1]:", np.shape(inputs[1]))
-            #print("state[0]:", np.shape(state[0]))
-            #print("state[1]:", np.shape(state[1]))
             if reverse:
                 for i_, l in enumerate(reversed(self.layers)): # Start with the top level
                     i = self.num_layers - i_ - 1
@@ -205,63 +190,39 @@ class MultiLayerHandler():
 
                     cur_state = state[i]
                     if i == 0: # IO level, last executed
-                        #print('IO level')
                         cur_input = [inputs[1]] + [state[i+1][0]]
                         outputs1, state_ = l(cur_input, cur_state, scope=scope)
                     elif i == self.num_layers - 1: # Highest level
-                        #print('Highest level')
                         cur_input = [inputs[0]] + [state[i-1][0]]
                         outputs2, state_ = l(cur_input, cur_state, scope=scope)
-                        # print(cur_input)
                     else: # Inbetween layers
                         cur_input = [state[i-1][0]] + [state[i+1][0]]
                         outputs3, state_ = l(cur_input, cur_state, scope=scope)
-
-                    # print('state_', type(state_))
-                    # print('state_[0]', state_[0].get_shape())
                     out_state += [state_]
 
                 out_state = tuple(reversed(out_state))
 
             else:
-                for i_, l in enumerate(self.layers): # Start with the top level
+                for i_, l in enumerate(self.layers): # Start with the bottom level
                     i = i_ 
                     scope = 'CTRNNCell_' + str(i)
 
                     cur_state = state[i]
-                    #print("state[0]:", np.shape(cur_state[0]))
-                    #print("state[1]:", np.shape(cur_state[1]))
                     if i == 0: # IO level, last executed
-                        #print('IO level')
                         cur_input = [inputs[1]] + [state[i+1][0]]
                         outputs1, state_ = l(cur_input, cur_state, scope=scope)
                     elif i == self.num_layers - 1: # Highest level
-                        #print('Highest level')
                         cur_input = [inputs[0]] + [state[i-1][0]]
                         outputs2, state_ = l(cur_input, cur_state, scope=scope)
-                        # print(cur_input)
                     else: # Inbetween layers
                         cur_input = [state[i-1][0]] + [state[i+1][0]]
                         outputs3, state_ = l(cur_input, cur_state, scope=scope)
-
-                    # print('state_', type(state_))
-                    # print('state_[0]', state_[0].get_shape())
                     out_state += [state_]
 
                 out_state = tuple(out_state)
 
             outputs = [outputs2, outputs1]
-            #print('outputs[0]:', outputs[0])
-            #print('outputs[1]:', outputs[1])
-            #print('out_state')
-            #shape_printer(out_state, 'MLH')
             return outputs, out_state
-
-        # with tf.variable_scope(scope or type(self).__name__):
-        #     for i, l in enumerate(self.layers):
-        #         scope = 'CTRNNCell_' + str(i)
-        #         inputs, state = l([inputs], state, scope=scope)
-        # return inputs, state
 
 
 class CTRNNModel(object):
@@ -287,7 +248,6 @@ class CTRNNModel(object):
 
         self.y = tf.placeholder(tf.int32, shape=[None, num_steps], name='outputPlaceholder')
         self.y_reshaped = tf.reshape(tf.transpose(self.y, [1,0]), [-1])
-        #self.y_reshaped = tf.reshape(self.y, [-1])
 
         self.final_seq = tf.placeholder(tf.float32, shape = [None, output_dim2], name = 'finalSequence')
 
@@ -324,25 +284,11 @@ class CTRNNModel(object):
             [tf.transpose(self.x, [1, 0, 2]), tf.transpose(self.sentence, [1,0,2])],
             initializer=self.init_tuple))
 
-        # print('self.rnn_outputs[-1]', self.rnn_outputs[-1].shape)
-        # print('self.final_states', type(self.final_states))
-        # print('self.final_states[0][-1]', self.final_states[0][-1].shape)
-        # print('self.final_states[1][-1]', self.final_states[1][-1].shape)
-
-        # print('shape_printer: self.final_states')
-        # shape_printer(self.final_states, 'fs')
-
-        # self.state_tuple = (self.rnn_outputs[-1], 
-        #                    (self.final_states[0][-1][-1], self.final_states[1][-1][-1]))
-
         state_state = []
         for i in range(self.num_layers):
             state_state += [(self.final_states[i][0][-1], self.final_states[i][1][-1])]
         state_state = tuple(state_state)
         self.state_tuple = (self.rnn_outputs[:][-1], state_state)
-
-        # print('shape_printer: self.state_tuple')
-        # shape_printer(self.state_tuple, 'st')
 
         rnn_outputs_sentence = self.rnn_outputs[1]
         rnn_outputs_sentence = tf.cast(tf.reshape(rnn_outputs_sentence, [-1, num_units[0]]), tf.float32)
@@ -357,10 +303,6 @@ class CTRNNModel(object):
             b = tf.get_variable('b', [output_dim], initializer=tf.constant_initializer(0.0, tf.float32))
             self.logits = tf.matmul(rnn_outputs_sentence, W) + b
             self.softmax = tf.nn.softmax(self.logits, dim=-1)
-            #self.labels_y = self.y_reshaped
-        #self.total_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-                #logits=self.logits, labels=self.y_reshaped))
-        #tf.summary.scalar('training/total_loss', self.total_loss)
 #################################################################################
 
         self.logits_cs = rnn_outputs_cs
@@ -370,12 +312,14 @@ class CTRNNModel(object):
         self.total_loss = tf.cond(self.direction, lambda: tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits, labels=self.y_reshaped)), lambda: tf.reduce_sum(tf.square(tf.subtract(self.final_seq, self.logits_cs))))
         tf.summary.scalar('training/total_loss', self.total_loss)
 
-        self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
+        #self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
+        self.train_op = optimizers.AMSGrad(learning_rate).minimize(self.total_loss)
         self.TBsummaries = tf.summary.merge_all()
 
-
+        # uncomment for GPU options (not worth it, more time-consuming)
         #config = tf.ConfigProto(log_device_placement = False, allow_soft_placement=True)
         #config.gpu_options.per_process_gpu_memory_fraction = 0.10
+
         config = tf.ConfigProto(device_count = {'CPU': 12,'GPU': 0}, allow_soft_placement = True, log_device_placement = False)
         config.gpu_options.per_process_gpu_memory_fraction = 0.3
         config.operation_timeout_in_ms = 50000
@@ -401,7 +345,6 @@ class CTRNNModel(object):
         Inputs_x_t = tf.constant(Inputs_x)
         Inputs_sentence_t = tf.constant(Inputs_sentence)
         Inputs_t = [Inputs_x_t, Inputs_sentence_t]
-        #print("shape of state:", np.shape(State))
 
         with tf.variable_scope("scan", reuse = tf.AUTO_REUSE):
             outputs, new_state = self.cell(Inputs_t, State, reverse = reverse)

@@ -86,17 +86,8 @@ def get_sentence(verb, obj):
 ######################################################################################
 # This function loads data from a file, to train the network
 # inputs are sequential (and always same order). 
-def loadTrainingData():
+def loadTrainingData(numInputNeurons, numControlNeurons, stepEachSeq, numSeq):
 
-
-    numInputNeurons = 29 # language neurons, 26 for letters plus space and stop plus "nothing"
-    numControlNeurons = 45 
-    stepEachSeq = 30
-
-
-    #sentences = ["bafffffffff", "kceeeeeeeee", "vvvvvrrrrr", "ghllllll", "uuuutttttt", "push the ball"]
-    numSeq = 64
-    
     # sequence of letters
     x_train = np.asarray(np.zeros((numSeq , stepEachSeq, numInputNeurons)),dtype=np.float32)
 
@@ -109,15 +100,12 @@ def loadTrainingData():
 
     lst = map(list, itertools.product([0, 1], repeat=4))
     k = 0
-    for t in range(0,8,1):
-        for j in range(0,8,1):
+    for t in range(0,int(np.sqrt(numSeq)),1):
+        for j in range(0,int(np.sqrt(numSeq)),1):
             sentence = get_sentence(lst[t], lst[j])
             sentence_list += [sentence]
-            #print(sentence)
             control_input[k, 0, 0:4] = lst[t]
             control_input[k, 0, 4:8] = lst[j]
-            #print("control:", control_input[k, 0, 0:8]) 
-            #raw_input()
             for f in range(0, stepEachSeq, 1):
                 if f>=4 and f < len(sentence)+4:
                     if sentence[f-4] == ' ':
@@ -133,12 +121,7 @@ def loadTrainingData():
                     y_train[k, f] = 27
             k = k+1 
 
-
-
-    print("steps: ", stepEachSeq)
-    print("number of sequences: ", numSeq)
-
-    return x_train, y_train, numSeq, stepEachSeq, control_input, sentence_list
+    return x_train, y_train, control_input, sentence_list
 
 def execute_pca(sentence, seq, States, lang_input, input_layer, lang_dim1, lang_dim2, control_dim, direction):
 
@@ -147,29 +130,6 @@ def execute_pca(sentence, seq, States, lang_input, input_layer, lang_dim1, lang_
     Mat_S2 = States[:,2, 0:lang_dim1]
     Mat_S3 = States[:,3, 0:lang_dim2]
     Mat_S4 = States[:,4, 0:control_dim]
-
-    #inputdata = pd.DataFrame(data = Mat_S0)
-
-    #pca = PCA(n_components = 2)
-    #plotdata = pca.fit(Mat_S0).transform(Mat_S0)
-    #print("data explained by PCA for Sentences: ", pca.explained_variance_ratio_)
-
-    #for i in range(len(plotdata)):
-     #   plt.scatter(plotdata[i,0], plotdata[i, 1], c='r', label = sentence)
-
-    #my_path= os.path.dirname(__file__)
-    #figure_path = os.path.join(my_path, "figuresSentences/")
-
-    #plt.title("Sentences trajectory");
-    #plt.xlabel("PC1");
-    #plt.ylabel("PC2");
-    #plt.grid();
-    #if direction:
-    #    plt.savefig(figure_path+sentence+'_Sentences_' + str(seq) + '_CS_to_sentences.png', dpi=125)
-    #else:
-    #    plt.savefig(figure_path+sentence+'_Sentences_' + str(seq) + '_sentences_to_CS.png', dpi=125)
-        
-    #plt.close()
 
 #############################################
 
@@ -187,8 +147,8 @@ def execute_pca(sentence, seq, States, lang_input, input_layer, lang_dim1, lang_
     figure_path = os.path.join(my_path, "figuresIO/")
 
     plt.title("IO trajectory");
-    plt.xlabel("PC1");
-    plt.ylabel("PC2");
+    plt.xlabel("PC1 :" + str(pca.explained_variance_ratio_[0]));
+    plt.ylabel("PC2 :" + str(pca.explained_variance_ratio_[1]));
     plt.grid();
     if direction:
         plt.savefig(figure_path+sentence+'_IO_layer_' + str(seq) + '_CS_to_sentences.png', dpi=125)
@@ -212,8 +172,8 @@ def execute_pca(sentence, seq, States, lang_input, input_layer, lang_dim1, lang_
     figure_path = os.path.join(my_path, "figuresFC/")
 
     plt.title("FC trajectory");
-    plt.xlabel("PC1");
-    plt.ylabel("PC2");
+    plt.xlabel("PC1 :" + str(pca.explained_variance_ratio_[0]));
+    plt.ylabel("PC2 :" + str(pca.explained_variance_ratio_[1]));
     plt.grid();
     if direction:
         plt.savefig(figure_path+sentence+'_FC_layer_'+ str(seq) + '_CS_to_sentences.png', dpi=125)
@@ -237,8 +197,8 @@ def execute_pca(sentence, seq, States, lang_input, input_layer, lang_dim1, lang_
     figure_path = os.path.join(my_path, "figuresSC/")
 
     plt.title("SC trajectory");
-    plt.xlabel("PC1");
-    plt.ylabel("PC2");
+    plt.xlabel("PC1 :" + str(pca.explained_variance_ratio_[0]));
+    plt.ylabel("PC2 :" + str(pca.explained_variance_ratio_[1]));
     plt.grid();
     if direction:
         plt.savefig(figure_path+sentence+'_SC_layer_'+ str(seq) + '_CS_to_sentences.png', dpi=125)
@@ -248,101 +208,64 @@ def execute_pca(sentence, seq, States, lang_input, input_layer, lang_dim1, lang_
 
 ###########################################
 
-    #inputdata = pd.DataFrame(data = Mat_S4)
-
-    #pca = PCA(n_components = 2)
-    #print("data explained by PCAfor CS: ", pca.explained_variance_ratio_)
-    #plotdata = pca.fit(Mat_S4).transform(Mat_S4)
-
-    #for i in range(len(plotdata)):
-    #    plt.scatter(plotdata[i,0], plotdata[i, 1], c='r', label = sentence)
-
-    #my_path= os.path.dirname(__file__)
-    #figure_path = os.path.join(my_path, "figuresCS/")
-
-    #plt.title("CS trajectory");
-    #plt.xlabel("PC1");
-    #plt.ylabel("PC2");
-    #plt.grid();
-    #if direction:
-    #    plt.savefig(figure_path+sentence+'_CS_'+ str(seq) + '_CS_to_sentences.png', dpi=125)
-    #else:
-    #    plt.savefig(figure_path+sentence+'_CS_'+ str(seq) + '_sentences_to_CS.png', dpi=125)
-    #plt.close()
-
 
 def plot(loss_list, fig, ax):
-    #fig.cla()
     ax.plot(loss_list, 'b')
-
     fig.canvas.flush_events()
-    #plt.draw()
-    #plt.pause(0.0001)
 
 
-x_train, y_train, numSeq, stepEachSeq, control_input, sentence_list = loadTrainingData()
 
-
-print("data loaded")
-
-lang_input = 29 # I/O layer
-input_layer = 40
-lang_dim1 = 160 # fast context
-lang_dim2 = 45 # slow context (without control neurons)
-control_dim = 8 # control neurons
-
-LEARNING_RATE = 5 * 1e-3
-
+######################################### Control Variables ################################
+direction = False
+alpha = 0.5
+RUN_PCA = True
 NEPOCH = 80000 # number of times to train each sentence
-#NEPOCH = 3
-    
-my_path= os.getcwd()
-figure_path = os.path.join(my_path, "matrix/")
-
-
-MTRNN = CTRNNModel([input_layer, lang_dim1, lang_dim2], [2, 5, 60], stepEachSeq, lang_dim2, lang_input, control_dim, LEARNING_RATE)
-
-
-plt.ion()
-fig = plt.figure()
-ax = plt.subplot(1,1,1)
-fig.show()
+threshold_lang = 0.015
+threshold_cs = 0.0001
+average_loss = 1000.0
+best_loss = 5
+best_loss_lang = 0.018
+best_loss_cs = 0.0005
 
 loss_list = []
 lang_loss_list = [5.0]
 cs_loss_list = [5.0]
 
-threshold_lang = 0.015
-threshold_cs = 0.0001
+my_path= os.getcwd()
 
-MTRNN.sess.run(tf.global_variables_initializer())
+########################################## Model parameters ################################
+lang_input = 29 # size of output/input sentence
+input_layer = 40 # IO layer
+lang_dim1 = 160 # fast context
+lang_dim2 = 45 # slow context (without control neurons)
+control_dim = 8 # size of output/input control sequence
 
-#print("control sequences:", control_input[:,0,0:8])
-#raw_input()
+numSeq = 64
+stepEachSeq = 30
+
+LEARNING_RATE = 5 * 1e-3
+
+MTRNN = CTRNNModel([input_layer, lang_dim1, lang_dim2], [2, 5, 60], stepEachSeq, lang_dim2, lang_input, control_dim, LEARNING_RATE)
+
+
+#################################### acquire data ##########################################
+x_train, y_train, control_input, sentence_list = loadTrainingData(lang_input, lang_dim2, stepEachSeq, numSeq)
 
 final_seq = np.zeros([numSeq, control_dim])
 for i in range(numSeq):
     final_seq[i,:] = control_input[i, 0, 0:8]
 
-
 init_state_IO = np.zeros([numSeq, input_layer], dtype = np.float32)
 init_state_fc = np.zeros([numSeq, lang_dim1], dtype = np.float32)
 init_state_sc = np.zeros([numSeq, lang_dim2], dtype = np.float32)
-#init_state_cn = np.zeros([numSeq, control_dim], dtype = np.float32)
 
-######################################### Control Variables ################################
-direction = False
-test = False
-alpha = 0.5
+print("data loaded")
 
-average_loss = 1000.0
+############################### training iterations #########################################
 
-best_loss = 5
+MTRNN.sess.run(tf.global_variables_initializer())
 
-best_loss_lang = 0.018
-best_loss_cs = 0.0005
 epoch_idx = 0
-#while cs_loss_list[-1] > threshold_cs:
 while lang_loss_list[-1] > threshold_lang and cs_loss_list[-1] > threshold_cs:
     print("Training epoch " + str(epoch_idx))
     if direction:
@@ -376,7 +299,6 @@ while lang_loss_list[-1] > threshold_lang and cs_loss_list[-1] > threshold_cs:
     print("Current best loss: ",best_loss)
     print("#################################")
     print("epoch "+str(epoch_idx)+", loss: "+str(loss))
-    #plot(loss_list, fig, ax)
     if lang_loss_list[-1] < best_loss_lang and cs_loss_list[-1] < best_loss_cs:
         model_path = my_path + "/mtrnn_"+str(epoch_idx) + "_loss_" + str(average_loss)
         save_path = MTRNN.saver.save(MTRNN.sess, model_path)
@@ -399,25 +321,28 @@ while lang_loss_list[-1] > threshold_lang and cs_loss_list[-1] > threshold_cs:
     print("saving time: ", (t2-t1).total_seconds())
     if epoch_idx > NEPOCH:
         break
+
+##################################### Print error graph ####################################
+plt.ion()
+fig = plt.figure()
+ax = plt.subplot(1,1,1)
+fig.show()
 plot(loss_list, fig, ax)
 model_path = my_path + "/mtrnn_"+str(epoch_idx) + "_loss_" + str(average_loss)
 save_path = MTRNN.saver.save(MTRNN.sess, model_path)
 
-# TEST #
+########################################## TEST ############################################
 
 MTRNN.saver.restore(MTRNN.sess, save_path)
 plt.ioff()
 plt.show()
 print("testing")
-test=True
-
 
 init_state_IO = np.zeros([1, input_layer], dtype = np.float32)
 init_state_fc = np.zeros([1, lang_dim1], dtype = np.float32)
 init_state_sc = np.zeros([1, lang_dim2], dtype = np.float32)
-#init_state_cn = np.zeros([1, control_dim], dtype = np.float32)
 
-for i in range(2, numSeq, 11):
+for i in range(0, numSeq, 1):
     new_output = np.asarray(np.zeros((1, stepEachSeq)),dtype=np.int32)
     new_input = np.asarray(np.zeros((1, stepEachSeq, lang_dim2)),dtype=np.float32)
     new_sentence = np.asarray(np.zeros((1, stepEachSeq, lang_input)), dtype=np.float32)
@@ -430,104 +355,102 @@ for i in range(2, numSeq, 11):
 
     direction = True
 
-    _state_tuple, _softmax, _logits = MTRNN.sess.run([MTRNN.state_tuple, MTRNN.softmax, MTRNN.logits], feed_dict={MTRNN.x:new_input, MTRNN.y:new_output, MTRNN.sentence:new_sentence, MTRNN.direction:direction, MTRNN.final_seq:new_final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
+    if RUN_PCA:
+        States = np.zeros([stepEachSeq, 5, lang_dim1], dtype = np.float32) # 3 layers + Input + output
+        state_list = []
+        output_list = []
+        softmax_list = np.zeros([stepEachSeq, 29], dtype = np.float32)
 
-    sentence = ""
-    print("Sequence with MTRNN:", new_input[:,0,0:8])
-    for t in range(stepEachSeq):
-        for g in range(29):
-            if _softmax[t,g] == max(_softmax[t]): 
-                if g <27:
-                    sentence += chr(96 + g)
-                if g == 27:
-                    sentence += " "
-                if g == 28:
-                    sentence += "."
-    print(sentence)
-    print("########################")
+        input_x = np.zeros([1, lang_dim2], dtype = np.float32)
+        input_sentence = np.zeros([1, lang_input], dtype = np.float32)
+        State = MTRNN.zero_state_tuple(1)[1]
+        with MTRNN.sess.as_default():
+            for l in range(stepEachSeq):
+                input_x[:,:] = new_input[0,l,:]
+                input_sentence[:,:] = new_sentence[0,l,:]
+                outputs, new_state, softmax = MTRNN.forward_step_test(input_x, input_sentence, State, direction)
+                state_list += [new_state]
+                output_list += [outputs]
+                softmax_array = softmax.eval()
+                softmax_list[l, :] = softmax_array
+                State = new_state
+                States[l, 0, 0:lang_input] = States[l, 0, 0:lang_input] + softmax_list[l,:]
+                States[l, 1, 0:input_layer] = States[l, 1, 0:input_layer] + new_state[0][1].eval()
+                States[l, 2, 0:lang_dim1] = States[l, 2, 0:lang_dim1] + new_state[1][1].eval()
+                States[l, 3, 0:lang_dim2] = States[l, 3, 0:lang_dim2] + new_state[2][1].eval()
+                States[l, 3, 0:control_dim] = States[l, 3, 0:control_dim] + new_input[0,l,0:8]
+            execute_pca(sentence_list[i], i, States, lang_input, input_layer, lang_dim1, lang_dim2, control_dim, direction)
+            
+        sentence = ""
+        print("Sequence with new model:", new_input[:,0,0:8])
+        for t in range(stepEachSeq):
+            for g in range(29):
+                if softmax_list[t,g] == max(softmax_list[t]): 
+                    if g <27:
+                        sentence += chr(96 + g)
+                    if g == 27:
+                        sentence += " "
+                    if g == 28:
+                        sentence += "."
+        print(sentence)
+        print("########################")
+    else:
+        _state_tuple, _softmax, _logits = MTRNN.sess.run([MTRNN.state_tuple, MTRNN.softmax, MTRNN.logits], feed_dict={MTRNN.x:new_input, MTRNN.y:new_output, MTRNN.sentence:new_sentence, MTRNN.direction:direction, MTRNN.final_seq:new_final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
 
-    States = np.zeros([stepEachSeq, 5, lang_dim1], dtype = np.float32) # 3 layers + Input + output
-    state_list = []
-    output_list = []
-    softmax_list = np.zeros([stepEachSeq, 29], dtype = np.float32)
-
-    input_x = np.zeros([1, lang_dim2], dtype = np.float32)
-    input_sentence = np.zeros([1, lang_input], dtype = np.float32)
-    State = MTRNN.zero_state_tuple(1)[1]
-    with MTRNN.sess.as_default():
-        for l in range(stepEachSeq):
-            input_x[:,:] = new_input[0,l,:]
-            input_sentence[:,:] = new_sentence[0,l,:]
-            #Inputs = [input_x, input_sentence]
-            outputs, new_state, softmax = MTRNN.forward_step_test(input_x, input_sentence, State, direction)
-            state_list += [new_state]
-            output_list += [outputs]
-            #print("size of new_state:", np.shape(new_state))
-            softmax_array = softmax.eval()
-            softmax_list[l, :] = softmax_array
-            State = new_state
-            #print("shape of state[0]: ", np.shape(new_state[0]))
-            #print("shape of state[0][1]: ", np.shape(new_state[0][1]))
-            #print("state of state[0][1]: ", new_state[0][1].eval())
-            States[l, 0, 0:lang_input] = States[l, 0, 0:lang_input] + softmax_list[l,:]
-            States[l, 1, 0:input_layer] = States[l, 1, 0:input_layer] + new_state[0][1].eval()
-            States[l, 2, 0:lang_dim1] = States[l, 2, 0:lang_dim1] + new_state[1][1].eval()
-            States[l, 3, 0:lang_dim2] = States[l, 3, 0:lang_dim2] + new_state[2][1].eval()
-            States[l, 3, 0:control_dim] = States[l, 3, 0:control_dim] + new_input[0,l,0:8]
-        execute_pca(sentence_list[i], i, States, lang_input, input_layer, lang_dim1, lang_dim2, control_dim, direction)
-        
-    sentence = ""
-    print("Sequence with new model:", new_input[:,0,0:8])
-    for t in range(stepEachSeq):
-        for g in range(29):
-            if softmax_list[t,g] == max(softmax_list[t]): 
-                if g <27:
-                    sentence += chr(96 + g)
-                if g == 27:
-                    sentence += " "
-                if g == 28:
-                    sentence += "."
-    print(sentence)
-    print("########################")
+        sentence = ""
+        print("Sequence with MTRNN:", new_input[:,0,0:8])
+        for t in range(stepEachSeq):
+            for g in range(29):
+                if _softmax[t,g] == max(_softmax[t]): 
+                    if g <27:
+                        sentence += chr(96 + g)
+                    if g == 27:
+                        sentence += " "
+                    if g == 28:
+                        sentence += "."
+        print(sentence)
+        print("########################")
 
 
     direction = False
     new_input = np.asarray(np.zeros((1, stepEachSeq, lang_dim2)),dtype=np.float32)
     new_sentence[0, :, :] = x_train[i, :, :]
 
-    _state_tuple, _logits_cs = MTRNN.sess.run([MTRNN.state_tuple, MTRNN.logits_cs], feed_dict={MTRNN.x:new_input, MTRNN.y:new_output, MTRNN.sentence:new_sentence, MTRNN.direction:direction, MTRNN.final_seq:new_final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
+    if RUN_PCA:
+        state_list = []
+        output_list = []
+        softmax_list = np.zeros([stepEachSeq, 29], dtype = np.float32)
 
+        input_x = np.zeros([1, lang_dim2], dtype = np.float32)
+        input_sentence = np.zeros([1, lang_input], dtype = np.float32)
+        State = MTRNN.zero_state_tuple(1)[1]
+        with MTRNN.sess.as_default():
+            for l in range(stepEachSeq):
+                input_x[:,:] = new_input[0,l,:]
+                input_sentence[:,:] = new_sentence[0,l,:]
+                #Inputs = [input_x, input_sentence]
+                outputs, new_state, softmax = MTRNN.forward_step_test(input_x, input_sentence, State, direction)
+                state_list += [new_state]
+                output_list += [outputs]
+                #print("size of new_state:", np.shape(new_state))
+                softmax_array = softmax.eval()
+                softmax_list[l, :] = softmax_array
+                State = new_state
+                output_array = outputs[0].eval()
+                States[l, 0, 0:lang_input] = States[l, 0, 0:lang_input] + new_sentence[0,l,:]
+                States[l, 1, 0:input_layer] = States[l, 1, 0:input_layer] + new_state[0][1].eval()
+                States[l, 2, 0:lang_dim1] = States[l, 2, 0:lang_dim1] + new_state[1][1].eval()
+                States[l, 3, 0:lang_dim2] = States[l, 3, 0:lang_dim2] + new_state[2][1].eval()
+                States[l, 3, 0:control_dim] = States[l, 3, 0:control_dim] + output_array[0, 0:control_dim]
+            execute_pca(sentence_list[i], i, States, lang_input, input_layer, lang_dim1, lang_dim2, control_dim, direction)
+        print("test: ", new_final_seq[0,:])
+        print("output:", output_array[0, 0:8])
+    else:
+        _state_tuple, _logits_cs = MTRNN.sess.run([MTRNN.state_tuple, MTRNN.logits_cs], feed_dict={MTRNN.x:new_input, MTRNN.y:new_output, MTRNN.sentence:new_sentence, MTRNN.direction:direction, MTRNN.final_seq:new_final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
 
-    state_list = []
-    output_list = []
-    softmax_list = np.zeros([stepEachSeq, 29], dtype = np.float32)
+        print("test: ", new_final_seq[0,:])
+        print("output: ", _logits_cs[-1, 0:8])
 
-    input_x = np.zeros([1, lang_dim2], dtype = np.float32)
-    input_sentence = np.zeros([1, lang_input], dtype = np.float32)
-    State = MTRNN.zero_state_tuple(1)[1]
-    with MTRNN.sess.as_default():
-        for l in range(stepEachSeq):
-            input_x[:,:] = new_input[0,l,:]
-            input_sentence[:,:] = new_sentence[0,l,:]
-            #Inputs = [input_x, input_sentence]
-            outputs, new_state, softmax = MTRNN.forward_step_test(input_x, input_sentence, State, direction)
-            state_list += [new_state]
-            output_list += [outputs]
-            #print("size of new_state:", np.shape(new_state))
-            softmax_array = softmax.eval()
-            softmax_list[l, :] = softmax_array
-            State = new_state
-            output_array = outputs[0].eval()
-            States[l, 0, 0:lang_input] = States[l, 0, 0:lang_input] + new_sentence[0,l,:]
-            States[l, 1, 0:input_layer] = States[l, 1, 0:input_layer] + new_state[0][1].eval()
-            States[l, 2, 0:lang_dim1] = States[l, 2, 0:lang_dim1] + new_state[1][1].eval()
-            States[l, 3, 0:lang_dim2] = States[l, 3, 0:lang_dim2] + new_state[2][1].eval()
-            States[l, 3, 0:control_dim] = States[l, 3, 0:control_dim] + output_array[0, 0:control_dim]
-        execute_pca(sentence_list[i], i, States, lang_input, input_layer, lang_dim1, lang_dim2, control_dim, direction)
-
-    print("output: ", _logits_cs[-1, 0:8])
-    print("test: ", new_final_seq[0,:])
-    #print("output diff model:", output_array[0, 0:8])
 
 MTRNN.sess.close()
 #MTRNNTest.sess.close()
