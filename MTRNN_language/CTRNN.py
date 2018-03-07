@@ -16,6 +16,7 @@ from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import variable_scope as vs
 
 
+
 class CTRNNCell(tf.nn.rnn_cell.RNNCell):
     """ API Conventions: https://github.com/tensorflow/tensorflow/blob/r1.2/tensorflow/python/ops/rnn_cell_impl.py
     """
@@ -81,8 +82,7 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
             # print()
 
             with tf.variable_scope('linear'):
-                logits = self._linear(inputs + [old_c], output_size=self.output_size, bias=True)
-                #gate_inputs = math_ops.matmul(array_ops.concat([inputs, old_c], 1), self._kernel)
+                logits = self._linear(inputs + [old_c], output_size=self.output_size, bias=False)
 
             with tf.variable_scope('applyTau'):
                 new_u = (1-1/self.tau)*old_u + 1/self.tau*logits
@@ -194,8 +194,10 @@ class MultiLayerHandler():
         with tf.variable_scope(scope or type(self).__name__):
             out_state = []
             outputs = [[],[]]
-            print("inputs[0]:", np.shape(inputs[0]))
-            print("inputs[1]:", np.shape(inputs[1]))
+            #print("inputs[0]:", np.shape(inputs[0]))
+            #print("inputs[1]:", np.shape(inputs[1]))
+            #print("state[0]:", np.shape(state[0]))
+            #print("state[1]:", np.shape(state[1]))
             if reverse:
                 for i_, l in enumerate(reversed(self.layers)): # Start with the top level
                     i = self.num_layers - i_ - 1
@@ -203,11 +205,11 @@ class MultiLayerHandler():
 
                     cur_state = state[i]
                     if i == 0: # IO level, last executed
-                        print('IO level')
+                        #print('IO level')
                         cur_input = [inputs[1]] + [state[i+1][0]]
                         outputs1, state_ = l(cur_input, cur_state, scope=scope)
                     elif i == self.num_layers - 1: # Highest level
-                        print('Highest level')
+                        #print('Highest level')
                         cur_input = [inputs[0]] + [state[i-1][0]]
                         outputs2, state_ = l(cur_input, cur_state, scope=scope)
                         # print(cur_input)
@@ -227,14 +229,14 @@ class MultiLayerHandler():
                     scope = 'CTRNNCell_' + str(i)
 
                     cur_state = state[i]
-                    print("state[0]:", np.shape(cur_state[0]))
-                    print("state[1]:", np.shape(cur_state[1]))
+                    #print("state[0]:", np.shape(cur_state[0]))
+                    #print("state[1]:", np.shape(cur_state[1]))
                     if i == 0: # IO level, last executed
-                        print('IO level')
+                        #print('IO level')
                         cur_input = [inputs[1]] + [state[i+1][0]]
                         outputs1, state_ = l(cur_input, cur_state, scope=scope)
                     elif i == self.num_layers - 1: # Highest level
-                        print('Highest level')
+                        #print('Highest level')
                         cur_input = [inputs[0]] + [state[i-1][0]]
                         outputs2, state_ = l(cur_input, cur_state, scope=scope)
                         # print(cur_input)
@@ -249,10 +251,10 @@ class MultiLayerHandler():
                 out_state = tuple(out_state)
 
             outputs = [outputs2, outputs1]
-            print('outputs[0]:', outputs[0])
-            print('outputs[1]:', outputs[1])
-            print('out_state')
-            shape_printer(out_state, 'MLH')
+            #print('outputs[0]:', outputs[0])
+            #print('outputs[1]:', outputs[1])
+            #print('out_state')
+            #shape_printer(out_state, 'MLH')
             return outputs, out_state
 
         # with tf.variable_scope(scope or type(self).__name__):
@@ -372,8 +374,11 @@ class CTRNNModel(object):
         self.TBsummaries = tf.summary.merge_all()
 
 
-        config = tf.ConfigProto(log_device_placement = True, allow_soft_placement=True)
-        config.gpu_options.per_process_gpu_memory_fraction = 0.10
+        #config = tf.ConfigProto(log_device_placement = False, allow_soft_placement=True)
+        #config.gpu_options.per_process_gpu_memory_fraction = 0.10
+        config = tf.ConfigProto(device_count = {'CPU': 12,'GPU': 0}, allow_soft_placement = True, log_device_placement = False)
+        config.gpu_options.per_process_gpu_memory_fraction = 0.3
+        config.operation_timeout_in_ms = 50000
 
         self.saver = tf.train.Saver(max_to_keep=1)
         self.sess = tf.Session(config = config)
@@ -381,17 +386,36 @@ class CTRNNModel(object):
     def zero_state_tuple(self, batch_size):
         """ Returns a tuple og zeros
         """
-        zero_input = np.zeros([batch_size, self.num_units[0]], dtype = np.float32)
+        zero_input = tf.constant(np.zeros([batch_size, self.num_units[0]], dtype = np.float32))
 
         zero_state = []
         for i, num_unit in enumerate(self.num_units):
-            zero_c = np.zeros([batch_size, self.num_units[i]], dtype = np.float32)
-            zero_u = np.zeros([batch_size, self.num_units[i]], dtype = np.float32)
+            zero_c = tf.constant(np.zeros([batch_size, self.num_units[i]], dtype = np.float32))
+            zero_u = tf.constant(np.zeros([batch_size, self.num_units[i]], dtype = np.float32))
             zero_state += [(zero_c, zero_u)]
 
         zero_state = tuple(zero_state)
         return (zero_input, zero_state)
-        # output = np.zeros([batch_size, self.num_units[0]])
-        # state = np.zeros([batch_size, self.num_units[0]])
-# return (output, (output, state))
+
+    def forward_step_test(self, Inputs_x, Inputs_sentence, State, reverse):
+        Inputs_x_t = tf.constant(Inputs_x)
+        Inputs_sentence_t = tf.constant(Inputs_sentence)
+        Inputs_t = [Inputs_x_t, Inputs_sentence_t]
+        #print("shape of state:", np.shape(State))
+
+        with tf.variable_scope("scan", reuse = tf.AUTO_REUSE):
+            outputs, new_state = self.cell(Inputs_t, State, reverse = reverse)
+        softmax = tf.constant(np.zeros([1, self.output_dim], dtype = np.float32))
+
+        outputs_sentence_sliced = tf.cast(tf.reshape(outputs[1], [-1, self.num_units[0]]), tf.float32)
+        outputs_sentence_sliced = tf.slice(outputs_sentence_sliced, [0, 0], [-1, self.output_dim])
+
+        if reverse == True:
+            with tf.variable_scope("softmax", reuse = tf.AUTO_REUSE):
+                W = tf.get_variable('W', [self.output_dim, self.output_dim], tf.float32)
+                b = tf.get_variable('b', [self.output_dim], initializer=tf.constant_initializer(0.0, tf.float32))
+                logits = tf.matmul(outputs_sentence_sliced, W) + b
+                softmax = tf.nn.softmax(logits, dim=-1)
+
+        return outputs, new_state, softmax
 
