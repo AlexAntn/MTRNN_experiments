@@ -240,7 +240,7 @@ def create_batch(x_train, y_train, control_input, batch_size):
     control_out = np.zeros((batch_size, control_input.shape[1], control_input.shape[2]))
     for i in range(batch_size):
         seq_index = np.random.randint(0,y_train.shape[0])
-        #print("sequence: ",seq_index)
+        print("sequence: ",seq_index)
         x_out[i, :, :] = x_train[seq_index, :, :]
         y_out[i, :, :] = y_train[seq_index, :, :]
         control_out[i, :, :] = control_input[seq_index, :, :]
@@ -333,10 +333,10 @@ def execute_pca(sentence, seq, States, lang_input, input_layer, lang_dim1, lang_
 
 ####################################### control Variables #######################################
 direction = True # generate sentence from CS
-alternate = False
-alpha = 1 
+alternate = True
+alpha = 0.5 
 RUN_PCA = True
-NEPOCH = 250000 # number of times to train each sequence
+NEPOCH = 70000 # number of times to train each sequence
 
 # DEFINE IF WE ARE TESTING MISSING SENTENCES HERE #
 ###################################################
@@ -345,19 +345,19 @@ numCombinationsMiss = 10
 
 # DEFINE IF WE ARE USING BATCHED INPUTS HERE #
 ##############################################
-USING_BIG_BATCH = True
-batch_size = 64
+USING_BIG_BATCH = False
+batch_size = 61
 
 
 threshold = 0.0005
-best_loss_lang = 30.0
-best_loss_cs = 0.0005
-threshold_lang = 10.0
-threshold_cs = 0.0001
+best_loss_lang = 50
+best_loss_cs = 0.15
+threshold_lang = 0.1
+threshold_cs = 0.01
 lang_loss = 5
 cs_loss = 5
-lang_loss_list = [60.0]
-cs_loss_list = [5.0]
+lang_loss_list = [1500.0]
+cs_loss_list = [5000.0]
 loss_list = []
 
 average_loss = 1000.0
@@ -386,6 +386,12 @@ MTRNN = CTRNNModel([lang_input, lang_dim1, lang_dim2], [2.0, 5.0, 60.0], stepEac
 ################################### acquire data ###############################################
 
 x_train, y_train, control_input, sentence_list = loadTrainingData(output_neurons, lang_input, lang_dim2, stepEachSeq, numSeq)
+
+
+#for g in range(1, numSeq, 1):
+#    plt.plot(x_train[g-1, 4:104,12], 'r')
+#    plt.plot(x_train[g, 4:104, 12], 'b')
+#    plt.show()
 
 old_x = x_train
 
@@ -422,104 +428,9 @@ init_state_sc = np.zeros([numSeqmod, lang_dim2], dtype = np.float32)
 
 print("data loaded")
 
-############################### training iterations ############################################
-MTRNN.sess.run(tf.global_variables_initializer())
-
-epoch_idx = 0
-flag_saved = False
-#while best_loss > threshold:
-while lang_loss_list[-1] > threshold_lang or cs_loss_list[-1] > threshold_cs:
-    print("Training epoch " + str(epoch_idx))
-    if USING_BIG_BATCH:
-        x_mod, y_mod, control_mod = create_batch(x_train, y_train, control_input, batch_size)
-        final_seq = np.zeros([numSeqmod, control_dim])
-        for i in range(numSeqmod):
-            final_seq[i, :] = control_mod[i, 0, 0:control_dim]
-    if direction:
-        cs_inputs = np.zeros([numSeqmod, stepEachSeq, lang_dim2], dtype = np.float32)
-        cs_inputs = control_mod
-    else:
-        cs_inputs = np.zeros([numSeqmod, stepEachSeq, lang_dim2], dtype = np.float32)
-
-    #################### Uncomment if you want to shuffle data for training #################
-    #x_mod, y_mod, init_state_sc, init_state_IO, control_mod = shuffle_data(x_mod, y_mod, init_state_sc, init_state_IO, control_mod)
-    #final_seq = np.zeros([numSeqmod, control_dim])
-    #for i in range(numSeqmod):
-    #    final_seq[i, :] = control_mod[i, 0, 0:control_dim]
-    #########################################################################################
-
-
-    t0 = datetime.datetime.now()
-    _total_loss, _train_op = MTRNN.sess.run([MTRNN.total_loss, MTRNN.train_op], feed_dict={MTRNN.x:x_mod[0:numSeqmod], MTRNN.y:y_mod[0:numSeqmod], MTRNN.cs:cs_inputs, MTRNN.direction:direction, MTRNN.final_seq:final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
-    t1 = datetime.datetime.now()
-    print("epoch time: ", (t1-t0).total_seconds())
-    if direction:
-        loss = _total_loss
-        print("training sequences: ", loss)
-        lang_loss = loss
-        if loss > 150:
-            lang_loss = 150
-        lang_loss_list.append(loss)
-    else:
-        loss = _total_loss
-        print("training CS: ", loss)
-        cs_loss = loss
-        if loss > 5:
-            cs_loss = 5
-        cs_loss_list.append(loss)
-    if epoch_idx%2 == 0:
-        average_loss = alpha*lang_loss + (1-alpha)*cs_loss
-    loss_list.append(average_loss)
-    print("Current best loss: ",best_loss)
-    print("#################################")
-    print("epoch "+str(epoch_idx)+", loss: "+str(loss))
-    if (alternate and lang_loss_list[-1] < best_loss_lang and cs_loss_list[-1] < best_loss_cs) or (not alternate and direction and lang_loss_list[-1] < best_loss_lang) or (not alternate and not direction and cs_loss_list[-1] < best_loss_cs): 
-        flag_saved = True
-        model_path = my_path + "/mtrnn_"+str(epoch_idx) + "_loss_" + str(average_loss)
-        save_path = MTRNN.saver.save(MTRNN.sess, model_path)
-        best_loss_lang = lang_loss_list[-1]
-        best_loss_cs = cs_loss_list[-1]
-        best_loss = alpha*lang_loss_list[-1] + (1-alpha)*cs_loss_list[-1]
-    epoch_idx += 1
-
-    if alternate:
-        if cs_loss_list[-1] < 2*lang_loss_list[-1] or cs_loss_list[-1] < threshold_cs:
-            direction = True
-            if epoch_idx%10 == 0:
-                direction = not direction
-
-        if lang_loss_list[-1] < 2*cs_loss_list[-1] or lang_loss_list[-1] < threshold_lang:
-            direction = False
-            if epoch_idx%10 == 0:
-                direction = not direction
-
-    t2 = datetime.datetime.now()
-    print("saving time: ", (t2-t1).total_seconds())
-    if epoch_idx > NEPOCH:
-        break
-    if np.isnan(_total_loss):
-        print("nan found, stopping...")
-        #print(_logits)
-        break
-
-
-##################################### Print error graph ####################################
-plt.ion()
-fig = plt.figure()
-ax = plt.subplot(1,1,1)
-fig.show()
-plot(loss_list, fig, ax)
-####################### FOR TEST PURPOSES ONLY ######################################
-if not flag_saved:
-    model_path = my_path + "/mtrnn_"+str(epoch_idx) + "_loss_" + str(average_loss)
-    save_path = MTRNN.saver.save(MTRNN.sess, model_path)
-#####################################################################################
-
-
+save_path = my_path + "/mtrnn_32838_loss_12.550785064697266"
 ########################################## TEST ############################################
 
-plt.ioff()
-fig.show()
 print("testing - press enter to continue")
 raw_input()
 MTRNN.saver.restore(MTRNN.sess, save_path)
@@ -579,17 +490,17 @@ for t in range(0,numSeq, jumps):
         States[l, 1, 0:lang_input] = States[l, 1, 0:lang_input] + new_state[0][1]
         States[l, 2, 0:lang_dim1] = States[l, 2, 0:lang_dim1] + new_state[1][1]
         States[l, 3, 0:lang_dim2] = States[l, 3, 0:lang_dim2] + new_state[2][1]
-        States[l, 4, 0:control_dim] = States[l, 4, 0:control_dim] + new_input[0,l,0:control_dim]
+        States[l, 4, 0:control_dim] = States[l, 4, 0:control_dim] + new_cs[0,l,0:control_dim]
 
-    execute_pca(sentence_list[t], t, States, output_neurons, lang_input, lang_dim1, lang_dim2, control_dim, direction)
+    #execute_pca(sentence_list[t], t, States, output_neurons, lang_input, lang_dim1, lang_dim2, control_dim, direction)
 
     output_vec = np.zeros([stepEachSeq, output_neurons], dtype = np.float32)
     for i in range(len(output_list)):
         output_vec[i,:] = output_list[i][1][0][0:output_neurons]
     #print(output_vec)
-    for i in range(0, output_neurons, 3):
-        plt.plot(output_vec[:,i], 'r')
-        plt.plot(y_train[t, :, i], 'b')
+    for i in range(0, output_neurons, 1):
+        plt.plot(output_vec[4:104,i], 'r')
+        plt.plot(y_train[t, 4:104, i], 'b')
         plt.show()
 
     total_error = 0.0
@@ -638,7 +549,7 @@ for t in range(0,numSeq, jumps):
         States[l, 3, 0:lang_dim2] = States[l, 3, 0:lang_dim2] + new_state[2][1]
         States[l, 4, 0:control_dim] = States[l, 4, 0:control_dim] + outputs[0][0][0:control_dim]
 
-    execute_pca(sentence_list[t], t, States, output_neurons, lang_input, lang_dim1, lang_dim2, control_dim, direction)
+    #execute_pca(sentence_list[t], t, States, output_neurons, lang_input, lang_dim1, lang_dim2, control_dim, direction)
 
     print("##############################################")
     print("cs output:", outputs[0][0][0:control_dim])

@@ -3,6 +3,8 @@ from __future__ import absolute_import, division, print_function
 import numpy as np
 import tensorflow as tf
 
+import optimizers
+
 from tensorflow.python.ops.rnn_cell_impl import _linear 
     # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/rnn_cell_impl.py
 
@@ -63,12 +65,6 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
         with tf.variable_scope(scope or type(self).__name__):
             old_c = state[0]
             old_u = state[1]
-            # print(scope)
-            # print('inputs', len(inputs), inputs[0].get_shape())
-            # print('state', type(state))
-            # print('state[0]', state[0].get_shape())
-            # print('state[1]', state[1].get_shape())
-            # print()
 
             with tf.variable_scope('linear'):
                 logits = _linear(inputs + [old_c], output_size=self.output_size, bias=False, kernel_initializer=tf.random_uniform_initializer(-0.025, 0.025))
@@ -127,33 +123,46 @@ class MultiLayerHandler():
         #     zero_states += l.zero_state(batch_size)
         # return zero_states
 
-    def __call__(self, input_IO, state, scope=None):
+    def __call__(self, input_IO, state, scope=None, reverse = True):
 
         with tf.variable_scope(scope or type(self).__name__):
             out_state = []
-            for i_, l in enumerate(reversed(self.layers)): # Start with the top level
-                i = self.num_layers - i_ - 1
-                scope = 'CTRNNCell_' + str(i)
+            outputs = [[],[]]
+            if reverse:
+                for i_, l in enumerate(reversed(self.layers)): # Start with the top level
+                    i = self.num_layers - i_ - 1
+                    scope = 'CTRNNCell_' + str(i)
 
-                cur_state = state[i]
-                if i == 0: # IO level, last executed
-                    print('IO level')
-                    cur_input = [input_IO] + [state[i+1][0]] #[input_IO] + 
-                elif i == self.num_layers - 1: # Highest level
-                    print('Highest level')
-                    cur_input = [state[i-1][0]]
-                else: # Inbetween layers
-                    cur_input = [state[i-1][0]] + [state[i+1][0]]
+                    cur_state = state[i]
+                    if i == 0: # IO level, last executed
+                        cur_input = [input_IO[1]] + [state[i+1][0]] 
+                        outputs1, state_ = l(cur_input, cur_state, scope=scope)
+                    elif i == self.num_layers - 1: # Highest level
+                        cur_input = [input_IO[0]] + [state[i-1][0]]
+                        outputs3, state_ = l(cur_input, cur_state, scope=scope)
+                    else: # Inbetween layers
+                        cur_input = [state[i-1][0]] + [state[i+1][0]]
+                        outputs2, state_ = l(cur_input, cur_state, scope=scope)
+                    out_state += [state_]
+                out_state = tuple(reversed(out_state))
+            else:
+                for i_, l in enumerate(self.layers): # Start with the top level
+                    i = i_ 
+                    scope = 'CTRNNCell_' + str(i)
 
-                outputs, state_ = l(cur_input, cur_state, scope=scope)
-                # print('state_', type(state_))
-                # print('state_[0]', state_[0].get_shape())
-                out_state += [state_]
-
-            out_state = tuple(reversed(out_state))
-
-            print('outputs', outputs.get_shape())
-            print('out_state')
+                    cur_state = state[i]
+                    if i == 0: # IO level, last executed
+                        cur_input = [input_IO[1]] + [state[i+1][0]] 
+                        outputs1, state_ = l(cur_input, cur_state, scope=scope)
+                    elif i == self.num_layers - 1: # Highest level
+                        cur_input = [input_IO[0]] + [state[i-1][0]]
+                        outputs3, state_ = l(cur_input, cur_state, scope=scope)
+                    else: # Inbetween layers
+                        cur_input = [state[i-1][0]] + [state[i+1][0]]
+                        outputs2, state_ = l(cur_input, cur_state, scope=scope)
+                    out_state += [state_]
+                out_state = tuple(out_state)
+            outputs = [outputs3, outputs1]
             shape_printer(out_state, 'MLH')
             return outputs, out_state
 
@@ -165,7 +174,8 @@ class MultiLayerHandler():
 
 
 class CTRNNModel(object):
-    def __init__(self, num_units, tau, num_steps, input_dim, output_dim, learning_rate=1e-4):
+    def __init__(self, num_units, tau, num_steps, input_dim, output_dim, output_dim2, learning_rate=1e-4):
+        #with tf.device('/cpu:0'):
         """ Assumptions
             * x is 3 dimensional: [batch_size, num_steps] 
             Args:
@@ -176,48 +186,39 @@ class CTRNNModel(object):
         self.num_layers = len(self.num_units)
         self.tau = tau
 
+        self.input_dim = input_dim
         self.output_dim = output_dim 
         self.activation = lambda x: 1.7159 * tf.tanh(2/3 * x)
         #self.activation = lambda x: tf.sigmoid(x)
 
-        self.x = tf.placeholder(tf.float32, shape=[None, num_steps, input_dim], name='inputPlaceholder')
+
+        self.cs = tf.placeholder(tf.float32, shape=[None, num_steps, input_dim], name='csPlaceholder')
+        self.cs_reshaped = tf.reshape(tf.transpose(self.cs, [1,0,2]), [-1])
+
+        self.x = tf.placeholder(tf.float32, shape=[None, num_steps, self.output_dim], name='inputPlaceholder')
+        self.x_reshaped = tf.reshape(tf.transpose(self.x, [1,0,2]), [-1])
         self.y = tf.placeholder(tf.float32, shape=[None, num_steps, output_dim], name='outputPlaceholder')
         self.y_reshaped = tf.reshape(tf.transpose(self.y, [1, 0, 2]), [-1, output_dim])
         #self.y_reshaped = tf.reshape(self.y, [-1])
 
-        init_input = tf.placeholder(tf.float32, shape=[None, self.num_units[0]], name='initInput')
+        self.final_seq = tf.placeholder(tf.float32, shape=[None, output_dim2], name='finalSequence')
+
+        self.direction = tf.placeholder(tf.bool, shape=())
+        # True means generating a sentence from cs
+        # false means generating a cs from sentence
+
+
+        init_input_sentence = tf.placeholder(tf.float32, shape=[None, self.num_units[0]], name='initInputSent')
+        init_input_cs = tf.placeholder(tf.float32, shape=[None, self.num_units[2]], name='initInputCS')
+        init_input = [init_input_cs, init_input_sentence]
         init_state = []
         for i, num_unit in enumerate(self.num_units):
             init_c = tf.placeholder(tf.float32, shape=[None, num_unit], name='initC_' + str(i))
             init_u = tf.placeholder(tf.float32, shape=[None, num_unit], name='initU_' + str(i))
             init_state += [(init_c, init_u)]
         init_state = tuple(init_state)
-        #print('init_input', init_input.get_shape())
-        #print('init_state[3][0]', init_state[3][0].get_shape())
-        #print()
-
         self.init_tuple = (init_input, init_state)
 
-        #zero_input = np.zeros([None, self.num_units[0]], dtype = np.float32)
-
-        #zero_state = []
-        #for i, num_unit in enumerate(self.num_units):
-        #    zero_c = np.zeros([None, self.num_units[i]], dtype = np.float32)
-        #    zero_u = np.zeros([None, self.num_units[i]], dtype = np.float32)
-        #    zero_state += [(zero_c, zero_u)]
-
-        #zero_state = tuple(zero_state)
-        #self.init_tuple = (zero_input, zero_state)
-
-        #init_state = self.zero_state_tuple(batch_size)#(init_input, init_state)
-        #self.init_tuple = init_state
-        # self.init_tuple = (init_input, init_state[0])
-
-        # init_c = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initC_')
-        # init_u = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initU_')
-        # self.init_tuple = (init_input, (init_c, init_u))
-        # print(init_state[0])
-        # print((init_c, init_u))
         W = tf.get_variable('W', [num_units[0], num_units[0]], tf.float32)
 
         cells = []
@@ -228,35 +229,14 @@ class CTRNNModel(object):
                 cells += [CTRNNCell(num_unit, tau=tau, activation=lambda x:tf.matmul(x, W))]
             else:
                 cells += [CTRNNCell(num_unit, tau=tau, activation=self.activation)]
-            #cells += [CTRNNCell(num_unit, tau=tau, activation=self.activation)]
         self.cell = MultiLayerHandler(cells) # First cell (index 0) is IO layer
 
-        # print('x', self.x.get_shape())
-        # print('init_tuple', type(self.init_tuple))
-        # print('init_tuple[0]', self.init_tuple[0].get_shape())
-        # print('init_tuple[1][0]', self.init_tuple[1][0].get_shape())
-        # print('init_tuple[1][1]', self.init_tuple[1][1].get_shape())
-        
-        #self.x = tf.nn.softmax(self.x, dim=-1)
-        
-        self.rnn_outputs, self.final_states = tf.scan(
-            lambda state, x: self.cell(x, state[1]),
-            tf.transpose(self.x, [1, 0, 2]),
-            # tf.transpose(x, [1, 0] + [i+2 for i in range(x_shape.shape[0]-2)]),
-                # We need shape = [num_seq, batch_size, ...]
-            initializer=self.init_tuple
-        )
 
-        # print('self.rnn_outputs[-1]', self.rnn_outputs[-1].shape)
-        # print('self.final_states', type(self.final_states))
-        # print('self.final_states[0][-1]', self.final_states[0][-1].shape)
-        # print('self.final_states[1][-1]', self.final_states[1][-1].shape)
+        with tf.variable_scope("scan", reuse = tf.AUTO_REUSE):
+            self.rnn_outputs, self.final_states = tf.cond(self.direction, 
+        lambda: tf.scan(lambda state, x: self.cell(x, state[1], reverse=True), [tf.transpose(self.cs, [1, 0, 2]), tf.transpose(self.x, [1, 0, 2])], initializer=self.init_tuple), 
+        lambda: tf.scan(lambda state, x: self.cell(x, state[1], reverse=False),[tf.transpose(self.cs, [1, 0, 2]), tf.transpose(self.x, [1, 0, 2])],initializer=self.init_tuple))
 
-        # print('shape_printer: self.final_states')
-        # shape_printer(self.final_states, 'fs')
-
-        # self.state_tuple = (self.rnn_outputs[-1], 
-        #                    (self.final_states[0][-1][-1], self.final_states[1][-1][-1]))
 
         state_state = []
         for i in range(self.num_layers):
@@ -264,32 +244,60 @@ class CTRNNModel(object):
         state_state = tuple(state_state)
         self.state_tuple = (self.rnn_outputs[-1], state_state)
 
-        # print('shape_printer: self.state_tuple')
-        # shape_printer(self.state_tuple, 'st')
 
-        rnn_outputs = tf.cast(tf.reshape(self.rnn_outputs, [-1, num_units[0]]), tf.float32)
+        rnn_outputs_sentence = self.rnn_outputs[1]
+        rnn_outputs_sentence = tf.cast(tf.reshape(rnn_outputs_sentence, [-1, num_units[0]]), tf.float32)
+        rnn_outputs_sentence = tf.slice(rnn_outputs_sentence, [0, 0], [-1, output_dim])
+        rnn_outputs_cs = self.rnn_outputs[0][num_steps-1] #we want the final step only
+        rnn_outputs_cs = tf.slice(rnn_outputs_cs, [0, 0], [-1, output_dim2])
 
-        # I will optimise for the cross entropy, as it should be the same from the point of view of the gradients
-
-        # FOR KULLBACK-LEIBLER IMPLEMENTATION, SEE BELOW
-        # note: while it follows the trajectory rather well, it seems like it has a constant displacement, probably because softmax "removes" the mean.
-        ##################################################
-        #self.logits = tf.slice(rnn_outputs, [0, 0], [-1, output_dim])
-        #self.total_loss = self.kullback_leibler(tf.nn.softmax(self.logits, dim = -1), tf.nn.softmax(self.y_reshaped, dim = -1))
-        #tf.summary.scalar('training/total_loss', self.total_loss)
 
         # FOR MSE SEE BELOW
         #####################################
-        self.logits = tf.slice(rnn_outputs, [0, 0], [-1, output_dim])
-        self.total_loss = tf.reduce_sum(tf.square(tf.subtract(self.y_reshaped, self.logits)))
-        tf.summary.scalar('training/total_loss', self.total_loss)
+        self.logits_sequence = rnn_outputs_sentence
+        self.total_loss_sequence = tf.reduce_sum(tf.square(tf.subtract(self.y_reshaped, self.logits_sequence)))
+        tf.summary.scalar('training/total_loss', self.total_loss_sequence)
+        #############################################
 
-        self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
+        self.logits_cs = rnn_outputs_cs
+        self.total_loss_cs = tf.reduce_sum(tf.square(tf.subtract(self.final_seq, self.logits_cs)))
+        tf.summary.scalar('training/total_loss', self.total_loss_cs)
+##########################################################################
+
+
+        self.total_loss = tf.cond(self.direction, lambda: tf.reduce_sum(tf.square(tf.subtract(self.y_reshaped, self.logits_sequence))), lambda: tf.reduce_sum(tf.square(tf.subtract(self.final_seq, self.logits_cs))))
+
+
+        self.train_op = optimizers.AMSGrad(learning_rate).minimize(self.total_loss)
         self.TBsummaries = tf.summary.merge_all()
 
 
-        self.saver = tf.train.Saver()
-        self.sess = tf.Session(config = tf.ConfigProto(log_device_placement=True))
+        config = tf.ConfigProto(device_count = {'CPU': 12,'GPU': 0}, allow_soft_placement = True, log_device_placement = False)
+        config.gpu_options.per_process_gpu_memory_fraction = 0.3
+        config.operation_timeout_in_ms = 50000
+
+        self.saver = tf.train.Saver(max_to_keep=1)
+        self.sess = tf.Session(config = config)
+
+    def forward_step_test(self):
+        #Inputs_x_t = tf.constant(Inputs_x)
+        #Inputs_sentence_t = tf.constant(Inputs_sentence)
+        self.Inputs_x_t = tf.placeholder(tf.float32, shape = [1, self.input_dim], name = 'CS_input')
+        self.Inputs_sentence_t = tf.placeholder(tf.float32, shape = [1, self.output_dim], name = 'sentence_input')
+        Inputs_t = [self.Inputs_x_t, self.Inputs_sentence_t]
+        self.direction = tf.placeholder(tf.bool, shape=())
+
+        with tf.variable_scope("test", reuse = tf.AUTO_REUSE):
+            init_state = []
+            for i, num_unit in enumerate(self.num_units):
+                init_c = tf.placeholder(tf.float32, shape=[None, num_unit], name='initC_' + str(i))
+                init_u = tf.placeholder(tf.float32, shape=[None, num_unit], name='initU_' + str(i))
+                init_state += [(init_c, init_u)]
+            State = tuple(init_state)
+
+        with tf.variable_scope("scan", reuse = tf.AUTO_REUSE):
+            self.outputs, self.new_state = tf.cond(self.direction, lambda: self.cell(Inputs_t, State, reverse = True), lambda: self.cell(Inputs_t, State, reverse = False))
+
 
     def kullback_leibler(self, x, y):
         return tf.reduce_sum(y*tf.log((y+0.000000001)/(x+0.000000001)))
