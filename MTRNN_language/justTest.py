@@ -314,83 +314,8 @@ init_state_sc = np.zeros([numSeq, lang_dim2], dtype = np.float32)
 
 print("data loaded")
 
-############################### training iterations #########################################
-
-MTRNN.sess.run(tf.global_variables_initializer())
-
-epoch_idx = 0
-#complicated logic:
-# 1) we train CS and Lang, or;
-# 2) we train only Lang, or;
-# 3) we train only CS.
-while (alternate and (lang_loss_list[-1] > threshold_lang or cs_loss_list[-1] > threshold_cs)) or (not alternate and ((direction and lang_loss_list[-1] > threshold_lang) or (not direction and cs_loss_list[-1] > threshold_cs))): 
-    print("Training epoch " + str(epoch_idx))
-    if direction:
-        inputs = np.zeros([numSeq, stepEachSeq, lang_input], dtype = np.float32)
-        cs_inputs = control_input
-    else:
-        inputs = x_train
-        cs_inputs = np.zeros([numSeq, stepEachSeq, lang_dim2], dtype = np.float32)
-
-    t0 = datetime.datetime.now()
-    _total_loss, _train_op, _state_tuple = MTRNN.sess.run([MTRNN.total_loss, MTRNN.train_op, MTRNN.state_tuple], feed_dict={MTRNN.x:cs_inputs, MTRNN.y:y_train, MTRNN.sentence:inputs, MTRNN.direction:direction, MTRNN.final_seq:final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
-    t1 = datetime.datetime.now()
-    print("epoch time: ", (t1-t0).total_seconds())
-    if direction:
-        loss = _total_loss
-        print("training sentences: ", loss)
-        new_loss = loss
-        if loss > 5:
-            new_loss = 5
-        lang_loss_list.append(new_loss)
-    else:
-        loss = _total_loss
-        print("training CS: ", loss)
-        new_loss = loss
-        if loss > 5:
-            new_loss = 5
-        cs_loss_list.append(new_loss)
-    if epoch_idx%2 == 0:
-        average_loss = alpha*lang_loss_list[-1] + (1-alpha)*cs_loss_list[-1]
-    loss_list.append(average_loss)
-    print("Current best loss: ",best_loss)
-    print("#################################")
-    print("epoch "+str(epoch_idx)+", loss: "+str(loss))
-    if lang_loss_list[-1] < best_loss_lang and cs_loss_list[-1] < best_loss_cs:
-        model_path = my_path + "/mtrnn_"+str(epoch_idx) + "_loss_" + str(average_loss)
-        save_path = MTRNN.saver.save(MTRNN.sess, model_path)
-        best_loss_lang = lang_loss_list[-1]
-        best_loss_cs = cs_loss_list[-1]
-        best_loss = alpha*lang_loss_list[-1] + (1-alpha)*cs_loss_list[-1]
-    epoch_idx += 1
-
-    if alternate:
-        if cs_loss_list[-1] < 2*lang_loss_list[-1] or cs_loss_list[-1] < threshold_cs:
-            direction = True
-            if epoch_idx%10 == 0:
-                direction = not direction
-
-        if lang_loss_list[-1] < 2*cs_loss_list[-1] or lang_loss_list[-1] < threshold_lang:
-            direction = False
-            if epoch_idx%10 == 0:
-                direction = not direction
-
-    t2 = datetime.datetime.now()
-    print("saving time: ", (t2-t1).total_seconds())
-    if epoch_idx > NEPOCH:
-        break
-
-##################################### Print error graph ####################################
-plt.ion()
-fig = plt.figure()
-ax = plt.subplot(1,1,1)
-fig.show()
-plot(loss_list, fig, ax)
-####################### FOR TEST PURPOSES ONLY ######################################
-#model_path = my_path + "/mtrnn_"+str(epoch_idx) + "_loss_" + str(average_loss)
-#save_path = MTRNN.saver.save(MTRNN.sess, model_path)
-#####################################################################################
-
+############################### 
+save_path = my_path + "/mtrnn_23054_loss_0.005006536259315908"
 ########################################## TEST ############################################
 
 MTRNN.saver.restore(MTRNN.sess, save_path)
@@ -564,3 +489,4 @@ for i in range(0, 1, jumps):
 
 
 MTRNN.sess.close()
+

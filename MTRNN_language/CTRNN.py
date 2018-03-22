@@ -1,3 +1,5 @@
+# code adapted from https://github.com/Faur/CTRNN
+
 from __future__ import absolute_import, division, print_function
 
 import numpy as np
@@ -80,6 +82,7 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
 
         return new_c, (new_c, new_u)
 
+    # I am using my own implementation since recent TensorFlow Updates broke _linear function
     def _linear(self, args, output_size, bias, bias_start=0.0):
         """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
         Args:
@@ -199,7 +202,6 @@ class MultiLayerHandler():
                         cur_input = [state[i-1][0]] + [state[i+1][0]]
                         outputs3, state_ = l(cur_input, cur_state, scope=scope)
                     out_state += [state_]
-
                 out_state = tuple(reversed(out_state))
             else:
                 for i_, l in enumerate(self.layers): # Start with the bottom level
@@ -207,21 +209,20 @@ class MultiLayerHandler():
                     scope = 'CTRNNCell_' + str(i)
 
                     cur_state = state[i]
-                    if i == 0: # IO level, last executed
+                    if i == 0: # IO level, first executed
                         cur_input = [inputs[1]] + [state[i+1][0]]
                         outputs1, state_ = l(cur_input, cur_state, scope=scope)
-                    elif i == self.num_layers - 1: # Highest level
+                    elif i == self.num_layers - 1: # Highest level, last executed
                         cur_input = [inputs[0]] + [state[i-1][0]]
                         outputs2, state_ = l(cur_input, cur_state, scope=scope)
                     else: # Inbetween layers
                         cur_input = [state[i-1][0]] + [state[i+1][0]]
                         outputs3, state_ = l(cur_input, cur_state, scope=scope)
                     out_state += [state_]
-
                 out_state = tuple(out_state)
-
             outputs = [outputs2, outputs1]
             return outputs, out_state
+
 
 
 class CTRNNModel(object):
@@ -239,6 +240,7 @@ class CTRNNModel(object):
         self.input_dim = input_dim
         self.output_dim = output_dim 
         self.activation = lambda x: 1.7159 * tf.tanh(2/3 * x)
+        # from: LeCun et al. 2012: Efficient backprop
 
         self.x = tf.placeholder(tf.float32, shape=[None, num_steps, input_dim], name='inputPlaceholder')
         self.x_reshaped = tf.reshape(tf.transpose(self.x, [1,0,2]), [-1])
@@ -287,7 +289,6 @@ class CTRNNModel(object):
         for i in range(self.num_layers):
             state_state += [(self.final_states[i][0][-1], self.final_states[i][1][-1])]
         state_state = tuple(state_state)
-
         self.state_tuple = (self.rnn_outputs[:][-1], state_state)
 
         rnn_outputs_sentence = self.rnn_outputs[1]
@@ -312,7 +313,6 @@ class CTRNNModel(object):
         self.total_loss = tf.cond(self.direction, lambda: tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits, labels=self.y_reshaped)), lambda: tf.reduce_sum(tf.square(tf.subtract(self.final_seq, self.logits_cs))))
         tf.summary.scalar('training/total_loss', self.total_loss)
 
-        #self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
         self.train_op = optimizers.AMSGrad(learning_rate).minimize(self.total_loss)
         self.TBsummaries = tf.summary.merge_all()
 
@@ -341,24 +341,34 @@ class CTRNNModel(object):
         zero_state = tuple(zero_state)
         return (zero_input, zero_state)
 
-    def forward_step_test(self, Inputs_x, Inputs_sentence, State, reverse):
-        Inputs_x_t = tf.constant(Inputs_x)
-        Inputs_sentence_t = tf.constant(Inputs_sentence)
-        Inputs_t = [Inputs_x_t, Inputs_sentence_t]
+    def forward_step_test(self): 
+        self.Inputs_x_t = tf.placeholder(tf.float32, shape = [1, self.input_dim], name = 'CS_input')
+        self.Inputs_sentence_t = tf.placeholder(tf.float32, shape = [1, self.output_dim], name = 'sentence_input')
+        Inputs_t = [self.Inputs_x_t, self.Inputs_sentence_t]
+
+        self.direction = tf.placeholder(tf.bool, shape=())
+        # true means generating a sentence from a cs
+        # false means generating a cs from a sentence
+
+        with tf.variable_scope("test", reuse = tf.AUTO_REUSE):
+            init_state = []
+            for i, num_unit in enumerate(self.num_units):
+                init_c = tf.placeholder(tf.float32, shape=[None, num_unit], name='initC_' + str(i))
+                init_u = tf.placeholder(tf.float32, shape=[None, num_unit], name='initU_' + str(i))
+                init_state += [(init_c, init_u)]
+            State = tuple(init_state)
 
         with tf.variable_scope("scan", reuse = tf.AUTO_REUSE):
-            outputs, new_state = self.cell(Inputs_t, State, reverse = reverse)
-        softmax = tf.constant(np.zeros([1, self.output_dim], dtype = np.float32))
+            self.outputs, self.new_state = tf.cond(self.direction, lambda: self.cell(Inputs_t, State, reverse = True), lambda: self.cell(Inputs_t, State, reverse = False))
 
-        outputs_sentence_sliced = tf.cast(tf.reshape(outputs[1], [-1, self.num_units[0]]), tf.float32)
+        outputs_sentence_sliced = tf.cast(tf.reshape(self.outputs[1], [-1, self.num_units[0]]), tf.float32)
         outputs_sentence_sliced = tf.slice(outputs_sentence_sliced, [0, 0], [-1, self.output_dim])
 
-        if reverse == True:
-            with tf.variable_scope("softmax", reuse = tf.AUTO_REUSE):
-                W = tf.get_variable('W', [self.output_dim, self.output_dim], tf.float32)
-                b = tf.get_variable('b', [self.output_dim], initializer=tf.constant_initializer(0.0, tf.float32))
-                logits = tf.matmul(outputs_sentence_sliced, W) + b
-                softmax = tf.nn.softmax(logits, dim=-1)
+        
+        with tf.variable_scope("softmax", reuse = tf.AUTO_REUSE):
+            W = tf.get_variable('W', [self.output_dim, self.output_dim], tf.float32)
+            b = tf.get_variable('b', [self.output_dim], initializer=tf.constant_initializer(0.0, tf.float32))
+            logits = tf.matmul(outputs_sentence_sliced, W) + b
+            self.softmax = tf.nn.softmax(logits, dim=-1)
 
-        return outputs, new_state, softmax
 
