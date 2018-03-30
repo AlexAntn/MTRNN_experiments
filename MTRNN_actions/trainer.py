@@ -116,11 +116,14 @@ def loadTrainingData(input_neurons, output_neurons, numInputNeurons, numControlN
 
     # control sequence working as input
     control_input = np.asarray(np.zeros((numSeq, stepEachSeq, numControlNeurons)),dtype=np.float32)
+
+    #different possible control sequences
+    control_sequences = np.asarray(np.zeros((81, stepEachSeq, numControlNeurons)),dtype=np.float32)
     
 
     print("steps: ", stepEachSeq)
     print("number of sequences: ", numSeq)
-    #### Select true to pick random sequences to train (with repetitions!)####
+    ####################### Select true to pick random sequences to train (with repetitions!)####
     RANDOM_SEQUENCES = False
 
     dataFile = open("mtrnnTD.txt", 'r')
@@ -145,10 +148,21 @@ def loadTrainingData(input_neurons, output_neurons, numInputNeurons, numControlN
             break
         if line.find("SEQUENCE") != -1:
             if k in sequences: # to select random sentences
+                #print "found sequence"
                 for i in range(4, stepEachSeq):
                     line = dataFile.readline()
                     line_data = line.split("\t")
                     line_data[-1] = line_data[-1].replace("\r\n",'')
+                    #if obj_sequences == []:
+                    #    obj_sequences += [line_data[1]] # we basically get the first and only the first object
+                    #if line_data[0] not in [sequence[0] for sequence in verb_sequences]:
+                    #    print(line_data[0])
+                    #    print(line_data[0] in verb_sequences[:][0])
+                    #    verb_sequences += [[line_data[0], line_data[1]]]
+                    #    print(verb_sequences)
+                    #    raw_input()
+                    #    
+                    #if [line_data[0], line_data[1]] in verb_sequences:
                     if i==4:
                         # motor actions start only after the sentence 
                         t = t+1
@@ -164,6 +178,8 @@ def loadTrainingData(input_neurons, output_neurons, numInputNeurons, numControlN
                         x_train[t, 4,output_neurons] = line_data[1]
                         control_input[t, :, :] = get_combination(line_data[0], line_data[1], control_input)
                         sentence = get_sentence(line_data[0], line_data[1])
+                        #print(sentence)
+                        #sentence_list += [sentence]
                     else:
                         x_train[t, i,0:output_neurons] = line_data[2:output_neurons+2]
                         x_train[t, i,output_neurons] = line_data[1]
@@ -186,10 +202,10 @@ def plot(loss_list, fig, ax):
 def removeCases(y_train, x_train, control_input, numSeq, stepEachSeq, numControlNeurons, numCombinationsMiss):
     if numSeq%numCombinationsMiss == 0:
         numSeqMod = numSeq - numCombinationsMiss
-        #print("number of sequences is multiple")
+        print("number of sequences is multiple")
     else:
         numSeqMod = numSeq - numCombinationsMiss -1
-        #print("number of sequences is NOT multiple")
+        print("number of sequences is NOT multiple")
     jumps = numSeq//numCombinationsMiss
     print("modified number of sequences: ", numSeqMod)
     y_mod = np.asarray(np.zeros((numSeqMod  , stepEachSeq, y_train.shape[2])),dtype=np.int32)
@@ -204,7 +220,14 @@ def removeCases(y_train, x_train, control_input, numSeq, stepEachSeq, numControl
             k += 1
         else:
             print("removed sentence number ", i)
+    raw_input()
     return y_mod, x_mod, control_mod, numSeqMod, jumps
+
+def softmax(x):
+    """Compute softmax values for each sets of scores in x."""
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum(axis = 0)
+
 
 def shuffle_data(x_train, y_train, init_state, init_state_IO, control_mod):
     new_x = np.zeros((x_train.shape[0], x_train.shape[1], x_train.shape[2]))
@@ -212,14 +235,21 @@ def shuffle_data(x_train, y_train, init_state, init_state_IO, control_mod):
     new_state = np.zeros((init_state.shape[0], init_state.shape[1]))
     new_state_IO = np.zeros((init_state_IO.shape[0], init_state_IO.shape[1]))
     new_control = np.zeros((control_mod.shape[0], control_mod.shape[1], control_mod.shape[2]))
+
     numSeq = x_train.shape[0]
 
     for i in range(numSeq):
+
         new_x[i,:,:] = x_train[i-1,:,:]
+
         new_y[i,:,:] = y_train[i-1,:,:]
+
         new_state[i,:] = init_state[i-1,:]
+
         new_state_IO[i,:] = init_state_IO[i-1,:]
+    
         new_control[i, :, :] = control_mod[i-1,:,:]
+
     return new_x, new_y, new_state, new_state_IO, new_control
 
 def create_batch(x_train, y_train, control_input, batch_size):
@@ -228,11 +258,11 @@ def create_batch(x_train, y_train, control_input, batch_size):
     control_out = np.zeros((batch_size, control_input.shape[1], control_input.shape[2]))
     for i in range(batch_size):
         seq_index = np.random.randint(0,y_train.shape[0])
+        #print("sequence: ",seq_index)
         x_out[i, :, :] = x_train[seq_index, :, :]
         y_out[i, :, :] = y_train[seq_index, :, :]
         control_out[i, :, :] = control_input[seq_index, :, :]
     return x_out, y_out, control_out
-
 
 def execute_pca(sentence, seq, States, lang_input, input_layer, lang_dim1, lang_dim2, control_dim, direction):
 
@@ -354,7 +384,7 @@ best_loss = 1000.0
 my_path= os.getcwd()
 
 ############# for testing - higher value, more sequences are jumped ##################
-jumps = 1
+jumps = 125
 
 
 ###################################### Model Parameters #########################################
@@ -416,10 +446,7 @@ MTRNN.sess.run(tf.global_variables_initializer())
 
 epoch_idx = 0
 flag_saved = False
-#complicated logic:
-# 1) we train CS and motor(lang), or;
-# 2) we train only motor(lang), or;
-# 3) we train only CS.
+#while best_loss > threshold:
 while (alternate and (lang_loss_list[-1] > threshold_lang or cs_loss_list[-1] > threshold_cs)) or (not alternate and direction and lang_loss_list[-1] > threshold_lang) or (not alternate and not direction and cs_loss_list[-1] > threshold_cs):
     print("Training epoch " + str(epoch_idx))
     if USING_BIG_BATCH:
@@ -510,6 +537,8 @@ if not flag_saved:
 
 ########################################## TEST ############################################
 
+plt.ioff()
+fig.show()
 print("testing - press enter to continue")
 raw_input()
 MTRNN.saver.restore(MTRNN.sess, save_path)
@@ -522,12 +551,6 @@ init_state_IO = np.zeros([1, lang_input], dtype = np.float32)
 init_state_fc = np.zeros([1, lang_dim1], dtype = np.float32)
 init_state_sc = np.zeros([1, lang_dim2], dtype = np.float32)
 
-verb = 0
-plt.grid()
-fullOutputList = []
-fullErrorList = []
-index_max = 0
-prev_max = 0
 for t in range(0,numSeq, jumps):
     new_output = np.asarray(np.zeros((1, stepEachSeq, output_neurons)),dtype=np.float32)
     new_cs = np.asarray(np.zeros((1, stepEachSeq, lang_dim2)),dtype=np.float32)
@@ -546,6 +569,7 @@ for t in range(0,numSeq, jumps):
     direction=True
 
     States = np.zeros([stepEachSeq, 5, lang_dim1], dtype = np.float32) # 3 layers + Input + output
+    #state_list = []
     output_list = []
 
     input_x = np.zeros([1, lang_dim2], dtype = np.float32)
@@ -564,37 +588,37 @@ for t in range(0,numSeq, jumps):
         init_state_21 = State[2][1]
         outputs, new_state = MTRNN.sess.run([MTRNN.outputs, MTRNN.new_state], feed_dict = {MTRNN.direction: direction, MTRNN.Inputs_x_t: input_x, MTRNN.Inputs_sentence_t: input_sentence,  'test/initU_0:0':init_state_01, 'test/initC_0:0':init_state_00, 'test/initU_1:0':init_state_11, 'test/initC_1:0':init_state_10, 'test/initU_2:0':init_state_21, 'test/initC_2:0':init_state_20})
         output_list += [outputs]
+        #print(outputs[1])
 
+        t00 = datetime.datetime.now()
+        State = new_state
+        t01 = datetime.datetime.now()
+        #print("matrix store time: ", (t01-t00).total_seconds())
         States[l, 0, 0:output_neurons] = States[l, 0, 0:output_neurons] + outputs[1][0][0:output_neurons]
         States[l, 1, 0:lang_input] = States[l, 1, 0:lang_input] + new_state[0][1]
         States[l, 2, 0:lang_dim1] = States[l, 2, 0:lang_dim1] + new_state[1][1]
         States[l, 3, 0:lang_dim2] = States[l, 3, 0:lang_dim2] + new_state[2][1]
-        States[l, 4, 0:control_dim] = States[l, 4, 0:control_dim] + new_cs[0,l,0:control_dim]
+        States[l, 4, 0:control_dim] = States[l, 4, 0:control_dim] + new_input[0,l,0:control_dim]
 
-    if RUN_PCA:
-        execute_pca(sentence_list[t], t, States, output_neurons, lang_input, lang_dim1, lang_dim2, control_dim, direction)
+    #execute_pca(sentence_list[t], t, States, output_neurons, lang_input, lang_dim1, lang_dim2, control_dim, direction)
 
     output_vec = np.zeros([stepEachSeq, output_neurons], dtype = np.float32)
     for i in range(len(output_list)):
         output_vec[i,:] = output_list[i][1][0][0:output_neurons]
-    error_mat = np.abs(y_train[t, 4:104, :] - output_vec[4:104,:])
-    average_error = np.zeros(100)
-    average_error[:] = np.sum(error_mat, axis = 1)/output_neurons
-    fullErrorList += [error_mat]
-    fullOutputList += [output_vec]
+    #print(output_vec)
+    for i in range(0, output_neurons, 3):
+        plt.plot(output_vec[:,i], 'r')
+        plt.plot(y_train[t, :, i], 'b')
+        plt.show()
 
-    error = np.amax(error_mat)
-    if error > prev_max:
-        prev_max = error
-        index_max = t
+    total_error = 0.0
+    for i in range(stepEachSeq):
+        temp_error = 0.0
+        for k in range(output_neurons):
+            temp_error += np.abs(old_output[0, i, k] - output_list[i][1][0][k])
+        total_error += temp_error
 
-    for i in range(0, output_neurons, 1):
-        color = i/output_neurons
-        color_inv = 1 - color
-        plt.figure(1)
-        plt.semilogy(error_mat[:,i], color=(color_inv, color, 0.0))
-    plt.semilogy(average_error, color=(0.0,0.0,1.0))
-    verb += 1
+    print("total error: ", total_error)
 
 ########################################### False ###########################################
     direction=False
@@ -612,6 +636,7 @@ for t in range(0,numSeq, jumps):
     ################################################
     
     for l in range(stepEachSeq):
+        #input_x[:,:] = new_input[0,l,:] #there is no CS input here
         input_sentence[:,:] = new_input[0,l,:]
         init_state_00 = State[0][0]
         init_state_01 = State[0][1]
@@ -622,39 +647,24 @@ for t in range(0,numSeq, jumps):
         outputs, new_state = MTRNN.sess.run([MTRNN.outputs, MTRNN.new_state], feed_dict = {MTRNN.direction: direction, MTRNN.Inputs_x_t: input_x, MTRNN.Inputs_sentence_t: input_sentence,  'test/initU_0:0':init_state_01, 'test/initC_0:0':init_state_00, 'test/initU_1:0':init_state_11, 'test/initC_1:0':init_state_10, 'test/initU_2:0':init_state_21, 'test/initC_2:0':init_state_20})
         output_list += [outputs]
 
-        States[l, 0, 0:output_neurons] = States[l, 0, 0:output_neurons] + new_input[0,l,0:output_neurons]
+        t00 = datetime.datetime.now()
+        State = new_state
+        t01 = datetime.datetime.now()
+        #print("matrix store time: ", (t01-t00).total_seconds())
+        States[l, 0, 0:input_neurons] = States[l, 0, 0:input_neurons] + new_input[0,l,0:input_neurons]
         States[l, 1, 0:lang_input] = States[l, 1, 0:lang_input] + new_state[0][1]
         States[l, 2, 0:lang_dim1] = States[l, 2, 0:lang_dim1] + new_state[1][1]
         States[l, 3, 0:lang_dim2] = States[l, 3, 0:lang_dim2] + new_state[2][1]
         States[l, 4, 0:control_dim] = States[l, 4, 0:control_dim] + outputs[0][0][0:control_dim]
 
-    if RUN_PCA:
-        execute_pca(sentence_list[t], t, States, output_neurons, lang_input, lang_dim1, lang_dim2, control_dim, direction)
+    #execute_pca(sentence_list[t], t, States, output_neurons, lang_input, lang_dim1, lang_dim2, control_dim, direction)
 
     print("##############################################")
-    print("Expected CS: ", new_final_seq[0, :])
-    print("Output CS:", outputs[0][0][0:control_dim])
+    print("cs output:", outputs[0][0][0:control_dim])
+    print("test: ", new_final_seq[0, :])
     print("##############################################")
-    if t == 53 or t == 107 or t == 161 or t == 215 or t == 269 or t == 323 or t == 359 or t == 395 or t == 431:
-        plt.figure(1)
-        plt.axhline(y=0.1, ls='-', color='black', linewidth = 3.0)
-        axes = plt.gca()
-        axes.set_ylim([0.00001, 0.5])
-        plt.savefig(my_path+'action' + str(t) + '_errorGraph.png', dpi=125)
-        plt.clf()
-        plt.grid()
 
-        for i in range(0, output_neurons, 1):
-            for g in range(0,stepEachSeq-4):
-                if error_mat[g,i] == np.amax(error_mat):
-                    print("error was on neuron " , i)
-                    plt.figure(2)
-                    plt.clf()
-                    plt.plot(fullOutputList[index_max][4:104,i], 'r')
-                    plt.plot(y_train[index_max, 4:104, i], 'b')
-                    plt.savefig(my_path+'action' + str(t) + '_trajectory.png', dpi=125)
-        index_max = 0
-        prev_max = 0
+    #_state_tuple, _logits_sequence = MTRNN.sess.run([MTRNN.state_tuple, MTRNN.logits_sequence], feed_dict={MTRNN.x:new_input, MTRNN.y:new_output, MTRNN.cs:new_cs, MTRNN.direction:direction, MTRNN.final_seq:new_final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
 
 total_neurons = lang_input + lang_dim1 + lang_dim2 
 print("this was done with ", NEPOCH, " epochs and a total of ", total_neurons, " neurons.")
@@ -698,6 +708,9 @@ print("this was done with ", NEPOCH, " epochs and a total of ", total_neurons, "
 #cbar.ax.set_yticklabels([str(-norm), '0', str(norm)])
 #plt.show()
 
+
+
 plt.ioff()
+plt.show()
 MTRNN.sess.close()
 

@@ -1,5 +1,3 @@
-# code obtained from https://github.com/junfengwen/AMSGrad/blob/master/optimizers.py
-
 from tensorflow.python.eager import context
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import control_flow_ops
