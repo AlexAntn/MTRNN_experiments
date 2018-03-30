@@ -1,3 +1,5 @@
+# code adapted from https://github.com/Faur/CTRNN
+
 from __future__ import absolute_import, division, print_function
 
 import numpy as np
@@ -80,6 +82,7 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
 
         return new_c, (new_c, new_u)
 
+# I am using my own implementation since recent TensorFlow Updates broke _linear function
     def _linear(self, args, output_size, bias, bias_start=0.0):
         """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
         Args:
@@ -201,12 +204,12 @@ class MultiLayerHandler():
                     out_state += [state_]
                 out_state = tuple(reversed(out_state))
             else:
-                for i_, l in enumerate(self.layers): # Start with the top level
+                for i_, l in enumerate(self.layers): # Start with the bottom level
                     i = i_ 
                     scope = 'CTRNNCell_' + str(i)
 
                     cur_state = state[i]
-                    if i == 0: # IO level, last executed
+                    if i == 0: # IO level, first executed
                         cur_input = [input_IO[1]] + [state[i+1][0]] 
                         outputs1, state_ = l(cur_input, cur_state, scope=scope)
                     elif i == self.num_layers - 1: # Highest level
@@ -221,16 +224,8 @@ class MultiLayerHandler():
             shape_printer(out_state, 'MLH')
             return outputs, out_state
 
-        # with tf.variable_scope(scope or type(self).__name__):
-        #     for i, l in enumerate(self.layers):
-        #         scope = 'CTRNNCell_' + str(i)
-        #         inputs, state = l([inputs], state, scope=scope)
-        # return inputs, state
-
-
 class CTRNNModel(object):
     def __init__(self, num_units, tau, num_steps, input_dim, output_dim, output_dim2, motor_input, learning_rate=1e-4):
-        #with tf.device('/cpu:0'):
         """ Assumptions
             * x is 3 dimensional: [batch_size, num_steps] 
             Args:
@@ -245,7 +240,7 @@ class CTRNNModel(object):
         self.output_dim = output_dim 
         self.motor_input = motor_input
         self.activation = lambda x: 1.7159 * tf.tanh(2/3 * x)
-        #self.activation = lambda x: tf.sigmoid(x)
+        # from: LeCun et al. 2012: Efficient backprop
 
 
         self.cs = tf.placeholder(tf.float32, shape=[None, num_steps, input_dim], name='csPlaceholder')
@@ -255,7 +250,6 @@ class CTRNNModel(object):
         self.x_reshaped = tf.reshape(tf.transpose(self.x, [1,0,2]), [-1])
         self.y = tf.placeholder(tf.float32, shape=[None, num_steps, output_dim], name='outputPlaceholder')
         self.y_reshaped = tf.reshape(tf.transpose(self.y, [1, 0, 2]), [-1, output_dim])
-        #self.y_reshaped = tf.reshape(self.y, [-1])
 
         self.final_seq = tf.placeholder(tf.float32, shape=[None, output_dim2], name='finalSequence')
 
@@ -308,7 +302,6 @@ class CTRNNModel(object):
         rnn_outputs_cs = tf.slice(rnn_outputs_cs, [0, 0], [-1, output_dim2])
 
 
-        # FOR MSE SEE BELOW
         #####################################
         self.logits_sequence = rnn_outputs_sentence
         self.total_loss_sequence = tf.reduce_sum(tf.square(tf.subtract(self.y_reshaped, self.logits_sequence)))
@@ -326,17 +319,11 @@ class CTRNNModel(object):
 
         self.train_op = optimizers.AMSGrad(learning_rate).minimize(self.total_loss)
 
-        # This is used for gradient clipping #
-        # THIS WORKS MUCH BETTER #
         optimizer = optimizers.AMSGrad(learning_rate)
         gradients, variables = zip(*optimizer.compute_gradients(self.total_loss))
         gradients, _ = tf.clip_by_global_norm(gradients, 7.0)
         self.train_op = optimizer.apply_gradients(zip(gradients, variables))
 
-        #optimizer = optimizers.AMSGrad(learning_rate)
-        #gvs = optimizer.compute_gradients(self.total_loss)
-        #capped_gvs = [(tf.clip_by_value(grad, -50., 50.), var) for grad, var in gvs]
-        #self.train_op = optimizer.apply_gradients(capped_gvs)
 
         self.TBsummaries = tf.summary.merge_all()
 
@@ -348,9 +335,8 @@ class CTRNNModel(object):
         self.saver = tf.train.Saver(max_to_keep=1)
         self.sess = tf.Session(config = config)
 
+# Function just for testing/using the network without defining the full graph #
     def forward_step_test(self):
-        #Inputs_x_t = tf.constant(Inputs_x)
-        #Inputs_sentence_t = tf.constant(Inputs_sentence)
         self.Inputs_x_t = tf.placeholder(tf.float32, shape = [1, self.input_dim], name = 'CS_input')
         self.Inputs_sentence_t = tf.placeholder(tf.float32, shape = [1, self.motor_input], name = 'sentence_input')
         Inputs_t = [self.Inputs_x_t, self.Inputs_sentence_t]
