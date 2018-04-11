@@ -275,7 +275,7 @@ class CTRNNModel(object):
         for i in range(self.num_layers): 
             num_unit = num_units[i]
             tau = self.tau[i]
-            if i == 0:
+            if i == 0: # we define a linear activation for the IO layer
                 cells += [CTRNNCell(num_unit, tau=tau, activation=lambda x:tf.matmul(x, W))]
             else:
                 cells += [CTRNNCell(num_unit, tau=tau, activation=self.activation)]
@@ -316,8 +316,8 @@ class CTRNNModel(object):
 
         self.total_loss = tf.cond(self.direction, lambda: tf.reduce_sum(tf.square(tf.subtract(self.y_reshaped, self.logits_sequence))), lambda: tf.reduce_sum(tf.square(tf.subtract(self.final_seq, self.logits_cs))))
 
-
-        self.train_op = optimizers.AMSGrad(learning_rate).minimize(self.total_loss)
+        # unclipped train op #
+        #self.train_op = optimizers.AMSGrad(learning_rate).minimize(self.total_loss)
 
         optimizer = optimizers.AMSGrad(learning_rate)
         gradients, variables = zip(*optimizer.compute_gradients(self.total_loss))
@@ -327,7 +327,7 @@ class CTRNNModel(object):
 
         self.TBsummaries = tf.summary.merge_all()
 
-
+        # adjust number of CPUs depending on your machine #
         config = tf.ConfigProto(device_count = {'CPU': 12,'GPU': 0}, allow_soft_placement = True, log_device_placement = False)
         config.gpu_options.per_process_gpu_memory_fraction = 0.3
         config.operation_timeout_in_ms = 50000
@@ -352,10 +352,6 @@ class CTRNNModel(object):
 
         with tf.variable_scope("scan", reuse = tf.AUTO_REUSE):
             self.outputs, self.new_state = tf.cond(self.direction, lambda: self.cell(Inputs_t, State, reverse = True), lambda: self.cell(Inputs_t, State, reverse = False))
-
-
-    def kullback_leibler(self, x, y):
-        return tf.reduce_sum(y*tf.log((y+0.000000001)/(x+0.000000001)))
 
     def zero_state_tuple(self, batch_size):
         """ Returns a tuple og zeros
