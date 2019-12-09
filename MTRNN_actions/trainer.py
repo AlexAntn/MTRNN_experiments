@@ -354,7 +354,7 @@ NEPOCH = 250000 # number of times to train each sequence
 
 # DEFINE IF WE ARE TESTING MISSING SENTENCES HERE #
 ###################################################
-TEST_MISSING_SENTENCES = True
+TEST_MISSING_SENTENCES = False
 numCombinationsMiss = 3
 
 # DEFINE IF WE ARE USING BATCHED INPUTS HERE #
@@ -364,7 +364,7 @@ batch_size = 32
 
 # DEFINE IF WE HAVE INPUTS ONLY AT t=0 #
 ########################################
-USING_INIT_INPUT = True
+USING_INIT_INPUT = False
 
 ########################################
 
@@ -467,8 +467,8 @@ while (alternate and (lang_loss_list[-1] > threshold_lang or cs_loss_list[-1] > 
             final_seq[i, :] = control_mod_b[i, 0, 0:control_dim]
 
     if direction:
-        cs_inputs = np.zeros([numSeqmod, stepEachSeq, lang_dim2], dtype = np.float32)
-        cs_inputs = control_mod
+        control_in = np.zeros([numSeqmod_b, stepEachSeq, lang_dim2], dtype = np.float32)
+        control_in = control_mod
         if USING_INIT_INPUT: # to generate a motor sequence we can either use only initial input 
             x_in[:,0,:] = x_mod_b[:,0,:] 
             y_in[:,:,:] = y_mod_b[:,:,:]
@@ -478,12 +478,12 @@ while (alternate and (lang_loss_list[-1] > threshold_lang or cs_loss_list[-1] > 
             y_in = y_mod_b
             control_in = control_mod_b
     else: # to generate CS we use the full motor input
-        cs_inputs = np.zeros([numSeqmod, stepEachSeq, lang_dim2], dtype = np.float32)
+        control_in = np.zeros([numSeqmod_b, stepEachSeq, lang_dim2], dtype = np.float32)
         x_in = x_mod_b
         y_in = y_mod_b
 
     t0 = datetime.datetime.now()
-    _total_loss, _train_op = MTRNN.sess.run([MTRNN.total_loss, MTRNN.train_op], feed_dict={MTRNN.x:x_in[0:numSeqmod_b], MTRNN.y:y_in[0:numSeqmod_b], MTRNN.cs:cs_inputs, MTRNN.direction:direction, MTRNN.final_seq:final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
+    _total_loss, _train_op = MTRNN.sess.run([MTRNN.total_loss, MTRNN.train_op], feed_dict={MTRNN.x:x_in[0:numSeqmod_b], MTRNN.y:y_in[0:numSeqmod_b], MTRNN.cs:control_in, MTRNN.direction:direction, MTRNN.final_seq:final_seq, 'initU_0:0':init_state_IO, 'initC_0:0':init_state_IO, 'initU_1:0':init_state_fc, 'initC_1:0':init_state_fc, 'initU_2:0':init_state_sc, 'initC_2:0':init_state_sc})
     t1 = datetime.datetime.now()
     print("epoch time: ", (t1-t0).total_seconds())
     if direction:
